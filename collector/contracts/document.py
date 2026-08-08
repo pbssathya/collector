@@ -29,35 +29,32 @@ class Document:
     It only knows what was encountered.
     """
 
-    # ─── Identity ────────────────────────────────────────────────
+    # ─── REQUIRED FIELDS (no defaults) ────────────────────────────
     id: str
     """Unique identifier for this Document."""
 
-    # ─── Source ──────────────────────────────────────────────────
     source_url: str
     """The URL or identifier of the Source."""
 
     retrieved_at: datetime
     """When the Document was retrieved."""
 
-    # ─── Content ─────────────────────────────────────────────────
     content: Any
     """The raw material retrieved (bytes, text, JSON, etc.)."""
 
-    content_type: Optional[str] = None
-    """MIME type or format indicator (e.g., 'text/html', 'application/json')."""
-
-    encoding: Optional[str] = None
-    """Character encoding if applicable (e.g., 'utf-8')."""
-
-    # ─── Provenance ──────────────────────────────────────────────
     run_id: str
     """The execution Run that produced this Document."""
 
     connector_id: str
     """The Connector that retrieved this Document."""
 
-    # ─── Execution Observations ──────────────────────────────────
+    # ─── OPTIONAL FIELDS (with defaults) ──────────────────────────
+    content_type: Optional[str] = None
+    """MIME type or format indicator (e.g., 'text/html', 'application/json')."""
+
+    encoding: Optional[str] = None
+    """Character encoding if applicable (e.g., 'utf-8')."""
+
     redirects: list[str] = field(default_factory=list)
     """Any redirects encountered during retrieval."""
 
@@ -70,6 +67,6 @@ class Document:
     error: Optional[str] = None
     """Any error encountered during retrieval."""
 
-    # ─── Metadata ─────────────────────────────────────────────────
     metadata: dict[str, Any] = field(default_factory=dict)
     """Additional observations not covered by other fields."""
+    

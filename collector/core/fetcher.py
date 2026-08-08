@@ -57,11 +57,13 @@ class HTTPFetcher(Connector):
         run_id = str(uuid.uuid4())
 
         try:
-            response = requests.get(
+            # Use a session to handle redirects properly
+            session = requests.Session()
+            session.max_redirects = self.max_redirects
+
+            response = session.get(
                 source_url,
                 timeout=self.timeout,
-                max_redirects=self.max_redirects,
-                allow_redirects=True,
             )
 
             duration_ms = (time.time() - start_time) * 1000
