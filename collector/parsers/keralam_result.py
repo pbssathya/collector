@@ -139,7 +139,7 @@ class KeralamResultParser:
         
         # Extract 9th Prize numbers
         ninth = self._extract_prize_list(text, r'9th Prize-Rs\s*:?\s*[\d,]+', r'Next')
-        
+
         return KeralamResult(
             lottery_name=lottery_name,
             draw_date=draw_date,
