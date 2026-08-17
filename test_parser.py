@@ -4,12 +4,13 @@ from collector.parsers.keralam_result import KeralamResultParser
 connector = KeralamLotteryConnector()
 parser = KeralamResultParser()
 
-# Fetch the latest result
-doc = connector.fetch_latest()
+# Use a known working serial
+SERIAL = 75352
+
+# Fetch the result
+doc = connector.fetch_draw(SERIAL)
 
 if doc and doc.content:
-    # The content is already bytes (PDF)
-    # Pass it directly to the parser
     result = parser.parse(doc.content)
 
     if result:
