@@ -1,8 +1,22 @@
-"""Report contract tests for Collector."""
+"""Report contract tests for Collector.
+
+These tests verify that the standardized CollectorReport contract:
+- Preserves complete canonical raw data
+- Contains all required sections
+- Does not contain analysis, decisions, or recommendations
+- Includes provenance and execution metadata
+"""
 
 import pytest
 from datetime import datetime
-from collector.models import CollectorReport, CollectionStatus, CollectionRequest
+from collector.models import (
+    CollectorReport,
+    CollectionStatus,
+    CollectionRequest,
+    ExecutionEvent,
+    Document,
+)
+
 
 def test_report_version_1_0_0():
     """Verify report version is 1.0.0."""
@@ -12,6 +26,7 @@ def test_report_version_1_0_0():
         execution_events=[]
     )
     assert report.version == "1.0.0"
+
 
 def test_report_contains_request_info():
     """Verify request information is present in report."""
@@ -31,9 +46,9 @@ def test_report_contains_request_info():
     assert report.request.source == "test_source"
     assert report.request.request_id == "test-123"
 
+
 def test_report_contains_collection_data():
-    """Verify collection data is present in report."""
-    from collector.parsers.document import Document
+    """Verify collection data (Document) is present in report with complete content."""
     doc = Document(
         content=b"test content",
         content_type="text/plain",
@@ -46,13 +61,14 @@ def test_report_contains_collection_data():
         document=doc
     )
     assert report.document is not None
+    # Verify COMPLETE canonical content is preserved
     assert report.document.content == b"test content"
 
+
 def test_report_contains_execution_metadata():
-    """Verify execution events are present."""
-    from collector.models import ExecutionEvent
+    """Verify execution events are present with timestamps."""
     event = ExecutionEvent(
-        event_type="START",
+        event_type="COLLECTION_STARTED",
         timestamp=datetime.now(),
         description="Collection started"
     )
@@ -62,23 +78,25 @@ def test_report_contains_execution_metadata():
         execution_events=[event]
     )
     assert len(report.execution_events) > 0
-    assert report.execution_events[0].event_type == "START"
+    assert report.execution_events[0].event_type == "COLLECTION_STARTED"
+    assert report.execution_events[0].timestamp is not None
+
 
 def test_report_contains_provenance():
-    """Verify provenance information is present."""
+    """Verify provenance information (collector_version) is present."""
     report = CollectorReport(
         version="1.0.0",
         status=CollectionStatus.COMPLETE,
         execution_events=[],
         collector_version="0.1.0"
     )
-    # Check that collector_version exists
+    # Check that collector_version exists and is set
     assert hasattr(report, 'collector_version')
     assert report.collector_version == "0.1.0"
 
+
 def test_raw_data_not_truncated_in_report():
-    """Verify raw data in report is not truncated."""
-    from collector.parsers.document import Document
+    """Verify raw data in report's Document is NOT truncated."""
     content = b"A" * 5000
     doc = Document(
         content=content,
@@ -91,28 +109,33 @@ def test_raw_data_not_truncated_in_report():
         execution_events=[],
         document=doc
     )
-    # Verify the full content is accessible
+    # Verify the COMPLETE content is accessible via the Document
     assert report.document.content == content
-    # Verify content is NOT truncated silently
-    # If Document has a truncated display repr, it should be clearly distinct
-    if hasattr(doc, 'content_display'):
-        assert len(doc.content_display) == len(content)
-    else:
-        # No display-specific truncation; content is canonical
-        pass
+    # Verify the content is NOT truncated (full length preserved)
+    assert len(report.document.content) == 5000
 
-def test_report_execution_events_exist():
-    """Verify execution events have required fields."""
-    from collector.models import ExecutionEvent
-    event = ExecutionEvent(
+
+def test_report_execution_events_have_timestamps():
+    """Verify all execution events have timestamps."""
+    event1 = ExecutionEvent(
         event_type="COLLECTION_STARTED",
         timestamp=datetime.now(),
         description="Collection started"
     )
-    # Verify event has required fields
-    assert event.event_type is not None
-    assert event.timestamp is not None
-    assert event.description is not None
+    event2 = ExecutionEvent(
+        event_type="COLLECTION_COMPLETED",
+        timestamp=datetime.now(),
+        description="Collection completed"
+    )
+    report = CollectorReport(
+        version="1.0.0",
+        status=CollectionStatus.COMPLETE,
+        execution_events=[event1, event2]
+    )
+    for event in report.execution_events:
+        assert event.timestamp is not None
+        assert isinstance(event.timestamp, datetime)
+
 
 def test_report_all_required_sections_exist():
     """Verify all required report sections exist."""
@@ -135,3 +158,21 @@ def test_report_all_required_sections_exist():
     # Optional but expected
     assert hasattr(report, 'document')
     assert hasattr(report, 'collector_version')
+
+
+def test_report_does_not_contain_analysis_or_decisions():
+    """Verify the report has no analysis, recommendation, or decision fields."""
+    report_fields = [f.name for f in CollectorReport.__dataclass_fields__.values()]
+    # No analysis fields
+    assert 'analysis' not in report_fields
+    assert 'insights' not in report_fields
+    # No recommendation fields
+    assert 'recommendation' not in report_fields
+    assert 'recommended_action' not in report_fields
+    # No decision fields
+    assert 'decision' not in report_fields
+    assert 'verdict' not in report_fields
+    # No severity fields
+    assert 'severity' not in report_fields
+    assert 'severity_level' not in report_fields
+    

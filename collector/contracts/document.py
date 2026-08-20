@@ -27,6 +27,10 @@ class Document:
     - Validation (whether the data is "correct")
 
     It only knows what was encountered.
+
+    The `content` field preserves the COMPLETE raw material.
+    It is NEVER truncated. Display representations (like __repr__)
+    are for human readability only and are clearly marked as such.
     """
 
     # ─── REQUIRED FIELDS (no defaults) ────────────────────────────
@@ -40,7 +44,7 @@ class Document:
     """When the Document was retrieved."""
 
     content: Any
-    """The raw material retrieved (bytes, text, JSON, etc.)."""
+    """The COMPLETE raw material retrieved (bytes, text, JSON, etc.)."""
 
     run_id: str
     """The execution Run that produced this Document."""
@@ -69,4 +73,21 @@ class Document:
 
     metadata: dict[str, Any] = field(default_factory=dict)
     """Additional observations not covered by other fields."""
+
+    def __repr__(self) -> str:
+        """Human-readable display representation.
+
+        IMPORTANT: This is a DISPLAY representation only.
+        It truncates the content preview for readability.
+        The COMPLETE canonical raw data is ALWAYS preserved in `self.content`.
+        """
+        content_preview = str(self.content)[:100] + "..." if len(str(self.content)) > 100 else str(self.content)
+        return (
+            f"Document(id={self.id!r}, "
+            f"source_url={self.source_url!r}, "
+            f"retrieved_at={self.retrieved_at!r}, "
+            f"content_type={self.content_type!r}, "
+            f"size={len(str(self.content))} chars, "
+            f"content_preview={content_preview!r})"
+        )
     
