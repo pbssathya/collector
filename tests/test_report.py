@@ -4,9 +4,10 @@ These tests verify that the production report dictionary
 returned by collect() conforms to the expected contract.
 """
 
-import pytest
+from unittest.mock import patch
+
 from collector.collect import collect
-from collector.domains.registry import DomainRegistry
+from collector.contracts.document import Document
 
 
 def test_report_version_1_0_0():
@@ -49,19 +50,32 @@ def test_report_contains_provenance():
 
 
 def test_raw_data_not_truncated_in_report():
-    """Verify raw data in report is preserved."""
-    registry = DomainRegistry()
-    connector = registry.get_connector("games/chance/lottery/kerala")
-    if connector:
-        try:
-            doc = connector.retrieve("12345")
-            assert doc is not None
-            assert doc.content is not None
-            assert len(doc.content) > 0
-        except Exception:
-            pytest.skip("External service unavailable")
-    else:
-        pytest.skip("Connector not available")
+    """Verify the report preserves the complete raw material."""
+    raw = bytes(range(256)) * 4
+    document = Document(
+        id="doc-test",
+        source_url="https://example.test/raw",
+        retrieved_at=__import__("datetime").datetime.now(),
+        content=raw,
+        run_id="run-test",
+        connector_id="test-connector",
+        content_type="application/octet-stream",
+    )
+
+    class TestConnector:
+        def retrieve(self, source):
+            return document
+
+        def parse(self, content):
+            return {"size": len(content)}
+
+    with patch("collector.collect.DomainRegistry.get_connector", return_value=TestConnector()):
+        result = collect("test/domain", "test-source", store=False)
+
+    assert result is not None
+    assert result["data"]["raw"] == raw
+    assert len(result["data"]["raw"]) == len(raw)
+    assert result["metadata"]["size_bytes"] == len(raw)
 
 
 def test_report_statuses_are_strings():
@@ -78,7 +92,7 @@ def test_report_does_not_contain_analysis_or_decisions():
     """Verify the report has no analysis, recommendation, or decision fields."""
     result = collect("games/chance/lottery/kerala", "invalid_source", store=False)
     assert result is not None
-    
+
     def collect_keys(obj, prefix=""):
         keys = set()
         if isinstance(obj, dict):
@@ -90,9 +104,9 @@ def test_report_does_not_contain_analysis_or_decisions():
             for item in obj:
                 keys.update(collect_keys(item, prefix))
         return keys
-    
+
     report_keys = collect_keys(result)
-    
+
     # No analysis-related keys
     assert not any("analysis" in k.lower() for k in report_keys)
     assert not any("recommend" in k.lower() for k in report_keys)
@@ -119,4 +133,3 @@ def test_event_events_are_dicts_not_objects():
         # Either 'description' or 'message' is present
         has_description = "description" in event or "message" in event
         assert has_description
-        
