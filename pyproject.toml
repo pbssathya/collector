@@ -7,11 +7,43 @@ name = "collector"
 version = "0.1.0"
 description = "A domain-independent data collection cell"
 readme = "readme.md"
-requires-python = ">=3.11"
+authors = [
+    {name = "pbssathya", email = "sathya@gooleos.com"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31.0",
+    "pypdf>=3.0.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["collector*"]
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+collector = "collector.cli:main"
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
