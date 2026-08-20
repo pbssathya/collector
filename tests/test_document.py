@@ -84,11 +84,11 @@ def test_error_response_preserved():
         content_type="text/html",
         source_url="https://example.com/notfound",
         status_code=404,
-        error_message="Resource not found"
+        error="Resource not found"  # Changed from error_message to error
     )
     # Verify error details are preserved
     assert doc.status_code == 404
-    assert doc.error_message == "Resource not found"
+    assert doc.error == "Resource not found"
 
 
 def test_content_hash_integrity():
