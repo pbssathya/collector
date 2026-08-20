@@ -29,13 +29,9 @@ class EventType(str, Enum):
     CONNECTION_ESTABLISHED = "connection_established"
     CONNECTION_FAILED = "connection_failed"
     REDIRECT = "redirect"
-    RETRY = "retry"
     PARSING_STARTED = "parsing_started"
     PARSING_COMPLETED = "parsing_completed"
     PARSING_FAILED = "parsing_failed"
-    VALIDATION_STARTED = "validation_started"
-    VALIDATION_COMPLETED = "validation_completed"
-    VALIDATION_FAILED = "validation_failed"
 
 
 @dataclass
@@ -92,7 +88,7 @@ class Document:
     status_code: Optional[int] = None
     """HTTP status code if applicable."""
 
-    error_message: Optional[str] = None
+    error: Optional[str] = None
     """Error message if collection failed."""
 
     def __post_init__(self):
