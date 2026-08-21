@@ -71,7 +71,7 @@ def collect(domain_path: str, source: str, store: bool = True, requester: Option
             },
             "provenance": {
                 "run_id": run_id,
-                "collector_version": "0.1.0",
+                "collector_version": "1.0.0",
                 "domain_version": "1.0.0"
             }
         }
@@ -199,7 +199,7 @@ def collect(domain_path: str, source: str, store: bool = True, requester: Option
             },
             "provenance": {
                 "run_id": run_id,
-                "collector_version": "0.1.0",
+                "collector_version": "1.0.0",
                 "domain_version": "1.0.0"
             }
         }
@@ -248,7 +248,7 @@ def _create_failed_report(domain_path, source, requested_at, requester, run_id, 
         },
         "provenance": {
             "run_id": run_id,
-            "collector_version": "0.1.0",
+            "collector_version": "1.0.0",
             "domain_version": "1.0.0"
         }
     }
