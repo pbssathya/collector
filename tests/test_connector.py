@@ -1,12 +1,16 @@
 """Connector contract tests for Collector.
 
-These tests verify that the production connectors work as expected.
+These tests verify connector behaviour without making the core contract depend
+on the availability or behaviour of an unrelated external test service.
 """
 
+from unittest.mock import patch
+
 import pytest
-from collector.domains.games.chance.lottery.kerala.connector import Connector as KeralaConnector
-from collector.core.fetcher import HTTPFetcher
+import requests
+
 from collector.contracts.connector import ConnectorError
+from collector.core.fetcher import HTTPFetcher
 from collector.domains.registry import DomainRegistry
 
 
@@ -35,37 +39,28 @@ def test_connection_failure_reporting():
 
 
 def test_http_redirect_following():
-    """Verify HTTP redirects are followed and recorded in Document.redirects."""
-    fetcher = HTTPFetcher()
-    # Use httpbin's redirect endpoint which returns a 302 redirect
-    doc = fetcher.retrieve("https://httpbin.org/redirect/1")
-    
-    assert doc is not None
-    
-    # Verify redirects field exists and is a list
-    assert hasattr(doc, 'redirects')
-    assert isinstance(doc.redirects, list)
-    
-    # Verify the redirect chain was actually recorded (non-empty)
-    assert len(doc.redirects) > 0, "Redirect chain should be recorded"
-    
-    # Production stores redirects as strings (the URL that was redirected from)
-    # Each entry is a string representing the URL that was redirected
-    for redirect in doc.redirects:
-        assert isinstance(redirect, str), "Redirect entry must be a string (URL)"
-        assert redirect.startswith("http"), "Redirect entry must be a valid URL"
-    
-    # Verify the final URL is not the original (redirect occurred)
-    original_url = "https://httpbin.org/redirect/1"
-    final_url = doc.source_url
-    # Note: source_url may be the final URL after redirects
-    # The test passes if we have at least one redirect recorded
-    # and the source_url is different from the original (if the redirect succeeded)
-    if doc.status_code == 200:
-        # If we got a successful response, the redirect should have been followed
-        # and source_url should be the final location
-        assert doc.source_url != original_url or len(doc.redirects) > 0
-    else:
-        # If the request failed, we still expect redirects to be recorded
-        assert len(doc.redirects) > 0
-        
+    """Verify HTTP redirects are followed and recorded deterministically."""
+    original_url = "https://example.test/start"
+    final_url = "https://example.test/final"
+
+    redirect_response = requests.Response()
+    redirect_response.status_code = 302
+    redirect_response.url = original_url
+    redirect_response.headers["Location"] = final_url
+
+    final_response = requests.Response()
+    final_response.status_code = 200
+    final_response.url = final_url
+    final_response._content = b"collected material"
+    final_response.headers["content-type"] = "text/plain"
+    final_response.encoding = "utf-8"
+    final_response.history = [redirect_response]
+
+    with patch("requests.Session.get", return_value=final_response):
+        doc = HTTPFetcher().retrieve(original_url)
+
+    assert doc.error is None
+    assert doc.status_code == 200
+    assert doc.content == b"collected material"
+    assert doc.redirects == [original_url]
+    assert all(isinstance(redirect, str) for redirect in doc.redirects)
