@@ -15,10 +15,13 @@ class Parser:
 
     PRIZE_HEADING_RE = re.compile(
         r"^(?P<label>(?:Cons(?:olation)?|\d+(?:st|nd|rd|th)|[A-Za-z][A-Za-z ]*?)\s+Prize)"
-        r"\s*-?\s*Rs\s*:?\s*(?P<amount>[\d,]+)\s*/\s*-?",
+        r"\s*-?\s*Rs\.?\s*:?\s*(?P<amount>[\d,]+)\s*/\s*-?",
         re.IGNORECASE,
     )
-    DATE_RE = re.compile(r"\b(\d{2}/\d{2}/\d{4})\b")
+    HELD_DATE_RE = re.compile(
+        r"\bheld\s+on\s*(?:[:-]\s*)?(\d{2}/\d{2}/\d{4})\b",
+        re.IGNORECASE,
+    )
     FIRST_PRIZE_ENTRY_RE = re.compile(
         r"^\s*\d+\)\s*([A-Z]+\s+\d+)\s*\(([^)]+)\)",
         re.IGNORECASE,
@@ -80,9 +83,10 @@ class Parser:
     def _extract_draw_date(self, value: str | Iterable[str]) -> str:
         """Read the actual held date, independent of surrounding schedule text."""
         for line in self._coerce_lines(value):
-            if "held on:-" not in line.lower():
+            lower = line.lower()
+            if lower.startswith("next ") or " will be held on " in lower:
                 continue
-            match = self.DATE_RE.search(line)
+            match = self.HELD_DATE_RE.search(line)
             if match:
                 return match.group(1)
         return "Unknown"
