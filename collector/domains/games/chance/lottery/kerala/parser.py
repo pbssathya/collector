@@ -14,6 +14,13 @@ from .result import Result
 class Parser:
     """Parses a Kerala Lottery result PDF."""
 
+    LOTTERY_NAME_RE = re.compile(
+        r"(?im)^[ \t]*(?:in[ \t]+)?"
+        r"([A-Z][A-Z0-9 \t-]*?LOTTERY(?:[ \t]+LOTTERY)?[ \t]+"
+        r"NO\.[A-Z]+-\d+(?:st|nd|rd|th)[ \t]+DRAW)"
+        r"(?=[ \t]+held[ \t]+on:-|[ \t]*$)"
+    )
+
     PRIZE_HEADING_RE = re.compile(
         r"(?P<label>(?:Cons(?:olation)?|\d+(?:st|nd|rd|th)|[A-Za-z][A-Za-z ]*?)\s+Prize)\s*-?\s*Rs\s*:?\s*(?P<amount>[\d,]+)\s*/\s*-?",
         re.IGNORECASE,
@@ -31,12 +38,7 @@ class Parser:
             print(f"Error reading PDF: {e}")
             return None
 
-        name_match = re.search(
-            r"([A-Z\s]+LOTTERY\s+NO\.[A-Z]+-\d+[a-z]+\s+DRAW)",
-            text,
-            re.IGNORECASE,
-        )
-        lottery_name = name_match.group(1) if name_match else "Unknown"
+        lottery_name = self._extract_lottery_name(text)
 
         date_match = re.search(
             r"held on:-\s*(\d{2}/\d{2}/\d{4})",
@@ -64,6 +66,13 @@ class Parser:
             first_prize_location=first_location,
             prize_tiers=self._extract_prize_tiers(text),
         )
+
+    def _extract_lottery_name(self, text: str) -> str:
+        """Extract the draw heading without absorbing neighbouring PDF text."""
+        match = self.LOTTERY_NAME_RE.search(text)
+        if not match:
+            return "Unknown"
+        return re.sub(r"\s+", " ", match.group(1)).strip()
 
     def _extract_prize_tiers(self, text: str) -> List[Dict[str, object]]:
         """Preserve every prize section encountered, without assuming a max tier."""
