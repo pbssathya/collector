@@ -19,7 +19,7 @@ class Parser:
         re.IGNORECASE,
     )
     HELD_DATE_RE = re.compile(
-        r"\bheld\s+on\s*:?-?\s*(\d{2}/\d{2}/\d{4})\b",
+        r"\bheld\s+on\s*(?:(?::|-)+\s*)?(\d{2}/\d{2}/\d{4})\b",
         re.IGNORECASE,
     )
     FIRST_PRIZE_ENTRY_RE = re.compile(
@@ -81,14 +81,26 @@ class Parser:
         return "Unknown"
 
     def _extract_draw_date(self, value: str | Iterable[str]) -> str:
-        """Read the actual held date, independent of surrounding schedule text."""
-        for line in self._coerce_lines(value):
+        """Read the actual held date, including legacy headings split across PDF lines."""
+        lines = self._coerce_lines(value)
+        for index, line in enumerate(lines):
             lower = line.lower()
             if lower.startswith("next ") or " will be held on " in lower:
                 continue
+
             match = self.HELD_DATE_RE.search(line)
             if match:
                 return match.group(1)
+
+            # Some legacy PDFs split the draw heading immediately after either
+            # "held" or "held on". Join only that local heading continuation;
+            # do not flatten the document or inspect future-draw schedule lines.
+            if "held" in lower and index + 1 < len(lines):
+                combined = f"{line} {lines[index + 1]}"
+                match = self.HELD_DATE_RE.search(combined)
+                if match:
+                    return match.group(1)
+
         return "Unknown"
 
     def _extract_first_prize(
