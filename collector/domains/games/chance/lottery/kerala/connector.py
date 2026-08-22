@@ -13,7 +13,7 @@ from .parser import Parser
 class Connector(BaseConnector):
     """
     A Connector for Kerala Lottery results.
-    
+
     Uses the drawserial pattern to fetch results.
     """
 
@@ -26,10 +26,10 @@ class Connector(BaseConnector):
     def retrieve(self, source: str) -> Document:
         """
         Retrieve a draw by serial number.
-        
+
         Args:
             source: The draw serial number (as string or int).
-        
+
         Returns:
             A Document containing the result page.
         """
@@ -39,18 +39,17 @@ class Connector(BaseConnector):
     def parse(self, content: bytes) -> Optional[Dict[str, Any]]:
         """
         Parse the PDF content.
-        
+
         Args:
             content: The PDF content as bytes.
-            
+
         Returns:
             A dictionary with the parsed data, or None if parsing fails.
         """
         result = self.parser.parse(content)
         if not result:
             return None
-        
-        # Convert the result object to a dictionary
+
         return {
             "lottery_name": result.lottery_name,
             "draw_date": result.draw_date,
@@ -61,6 +60,7 @@ class Connector(BaseConnector):
             "third_prize": result.third_prize,
             "third_prize_location": result.third_prize_location,
             "consolation_prizes": result.consolation_prizes,
+            "prize_tiers": result.prize_tiers,
             "fourth_prize_numbers": result.fourth_prize_numbers,
             "fifth_prize_numbers": result.fifth_prize_numbers,
             "sixth_prize_numbers": result.sixth_prize_numbers,
@@ -70,15 +70,7 @@ class Connector(BaseConnector):
         }
 
     def supports(self, source: str) -> bool:
-        """
-        Check if this connector supports the given source.
-        
-        Args:
-            source: The source identifier.
-            
-        Returns:
-            True if the source is a valid serial number.
-        """
+        """Check if this connector supports the given source."""
         try:
             int(source)
             return True
