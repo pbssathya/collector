@@ -28,6 +28,9 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
+pdf-probe = [
+    "PyMuPDF>=1.24.0",
+]
 
 [project.scripts]
 collector = "collector.cli:main"
