@@ -19,7 +19,7 @@ class Parser:
         re.IGNORECASE,
     )
     HELD_DATE_RE = re.compile(
-        r"\bheld\s+on\s*(?:[:-]\s*)?(\d{2}/\d{2}/\d{4})\b",
+        r"\bheld\s+on\s*:?-?\s*(\d{2}/\d{2}/\d{4})\b",
         re.IGNORECASE,
     )
     FIRST_PRIZE_ENTRY_RE = re.compile(
