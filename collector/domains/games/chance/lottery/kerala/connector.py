@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 from collector.core.fetcher import HTTPFetcher
 from collector.contracts.connector import Connector as BaseConnector
 from collector.contracts.document import Document
+from .history import OfficialHistoryResolver
 from .parser import Parser
 
 
@@ -14,7 +15,9 @@ class Connector(BaseConnector):
     """
     A Connector for Kerala Lottery results.
 
-    Uses the drawserial pattern to fetch results.
+    Uses the drawserial pattern to fetch results. When historical drawserials contain
+    a large discontinuity, ``previous_source`` can ask the official older-draw
+    resolver for the nearest published serial below the current one.
     """
 
     RESULT_BASE = "http://result.keralalotteries.com/viewlotisresult.php"
@@ -22,6 +25,7 @@ class Connector(BaseConnector):
     def __init__(self, **kwargs):
         self.fetcher = HTTPFetcher()
         self.parser = Parser()
+        self.history_resolver = OfficialHistoryResolver()
 
     def retrieve(self, source: str) -> Document:
         """
@@ -68,6 +72,16 @@ class Connector(BaseConnector):
             "eighth_prize_numbers": result.eighth_prize_numbers,
             "ninth_prize_numbers": result.ninth_prize_numbers,
         }
+
+    def previous_source(self, source: str) -> Optional[str]:
+        """Return the nearest earlier published drawserial, if discoverable."""
+        try:
+            before_source = int(source)
+        except ValueError:
+            return None
+
+        previous = self.history_resolver.previous_source_id(before_source)
+        return str(previous) if previous is not None else None
 
     def supports(self, source: str) -> bool:
         """Check if this connector supports the given source."""
