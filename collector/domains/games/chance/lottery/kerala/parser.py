@@ -15,7 +15,10 @@ class Parser:
     """Parses a Kerala Lottery result PDF."""
 
     LOTTERY_NAME_RE = re.compile(
-        r"(?im)^[ \t]*([A-Z][A-Z0-9 \t-]*?LOTTERY(?:[ \t]+LOTTERY)?[ \t]+NO\.[A-Z]+-\d+(?:st|nd|rd|th)[ \t]+DRAW)[ \t]*$"
+        r"(?im)^[ \t]*(?:in[ \t]+)?"
+        r"([A-Z][A-Z0-9 \t-]*?LOTTERY(?:[ \t]+LOTTERY)?[ \t]+"
+        r"NO\.[A-Z]+-\d+(?:st|nd|rd|th)[ \t]+DRAW)"
+        r"(?=[ \t]+held[ \t]+on:-|[ \t]*$)"
     )
 
     PRIZE_HEADING_RE = re.compile(
