@@ -18,7 +18,7 @@ class Parser:
         r"(?im)^[ \t]*(?:in[ \t]+)?"
         r"([A-Z][A-Z0-9 \t-]*?LOTTERY(?:[ \t]+LOTTERY)?[ \t]+"
         r"NO\.[A-Z]+-\d+(?:st|nd|rd|th)[ \t]+DRAW)"
-        r"(?=[ \t]+held[ \t]+on:-|[ \t]*$)"
+        r"(?=[ \t]+(?:held|scheduled)[ \t]+on(?::|-)|[ \t]*$)"
     )
 
     PRIZE_HEADING_RE = re.compile(
