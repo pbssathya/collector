@@ -3,52 +3,12 @@ from __future__ import annotations
 import json
 import sys
 
-import fitz  # PyMuPDF
-
 from collector.domains.registry import DomainRegistry
+from collector.extractors.pdf import extract_pdf_structure
 
 
 DOMAIN = "games/chance/lottery/kerala"
 DEFAULT_SOURCES = ["75357", "74290", "75170"]
-
-
-def extract_structure(content: bytes) -> dict:
-    document = fitz.open(stream=content, filetype="pdf")
-    pages = []
-
-    for page_number, page in enumerate(document, start=1):
-        page_dict = page.get_text("dict")
-        lines = []
-
-        for block in page_dict.get("blocks", []):
-            if block.get("type") != 0:
-                continue
-
-            for line in block.get("lines", []):
-                spans = line.get("spans", [])
-                text = "".join(span.get("text", "") for span in spans).strip()
-                if not text:
-                    continue
-
-                lines.append(
-                    {
-                        "text": text,
-                        "bbox": line.get("bbox"),
-                        "spans": [
-                            {
-                                "text": span.get("text", ""),
-                                "bbox": span.get("bbox"),
-                                "size": span.get("size"),
-                                "font": span.get("font"),
-                            }
-                            for span in spans
-                        ],
-                    }
-                )
-
-        pages.append({"page": page_number, "lines": lines})
-
-    return {"pages": pages}
 
 
 def interesting_lines(structure: dict) -> list[dict]:
@@ -84,7 +44,7 @@ def main() -> int:
                 print("error:", document.error)
             continue
 
-        structure = extract_structure(document.content)
+        structure = extract_pdf_structure(document.content)
         lines = interesting_lines(structure)
         print("pdf bytes:", len(document.content))
         print("pages:", len(structure["pages"]))
