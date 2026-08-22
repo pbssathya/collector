@@ -18,6 +18,24 @@ POURNAMI LOTTERY NO. RN-436th DRAW scheduled on 22/06/2020 at 03:00 PM and held 
     assert Parser()._extract_draw_date(text) == "23/06/2020"
 
 
+def test_legacy_held_on_date_can_continue_on_next_pdf_line():
+    lines = [
+        "Karunya Plus LOTTERY NO. KN-324th DRAW scheduled on 09/07/2020 at 03:00 PM and held on",
+        "12/07/2020, at GOVT. MODEL B.H.S.S., ATTINGAL",
+    ]
+
+    assert Parser()._extract_draw_date(lines) == "12/07/2020"
+
+
+def test_legacy_held_and_on_date_can_split_between_pdf_lines():
+    lines = [
+        "MONSOON BUMPER-2020 LOTTERY NO. BR-74th DRAW scheduled on 30/07/2020 at 03:00 PM and held",
+        "on 04/08/2020, at GORKY BHAVAN",
+    ]
+
+    assert Parser()._extract_draw_date(lines) == "04/08/2020"
+
+
 def test_next_draw_schedule_is_not_mistaken_for_actual_draw_date():
     text = """
 Next NIRMAL WEEKLY LOTTERY Lottery Draw will be held on 07/08/2020 at GORKY BHAVAN
