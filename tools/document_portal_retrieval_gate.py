@@ -33,6 +33,27 @@ LOTTERY_TERMS = (
     "draw",
     "ഭാഗ്യക്കുറി",
 )
+RESULT_MARKERS = (
+    "lottery no",
+    "draw held on",
+    "draw held",
+    "1st prize",
+    "first prize",
+    "ticket no",
+)
+TOKEN_STOP = {
+    "document",
+    "documents",
+    "details",
+    "government",
+    "kerala",
+    "lottery",
+    "lotteries",
+    "date",
+    "download",
+    "view",
+    "more",
+}
 
 
 def strict_same_origin(url: str) -> bool:
@@ -72,6 +93,11 @@ def lottery_evidence(text: str) -> bool:
     return any(term.lower() in lower for term in LOTTERY_TERMS)
 
 
+def strong_result_evidence(text: str) -> bool:
+    lower = text.lower()
+    return lottery_evidence(text) and any(marker in lower for marker in RESULT_MARKERS)
+
+
 def strip_html(fragment: str) -> str:
     without_script = re.sub(r"<script\b[^>]*>.*?</script>", " ", fragment, flags=re.I | re.S)
     without_style = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_script, flags=re.I | re.S)
@@ -79,13 +105,13 @@ def strip_html(fragment: str) -> str:
 
 
 def enclosing_fragment(html_text: str, match_start: int, match_end: int) -> str:
-    for tag in ("tr", "li"):
+    for tag in ("tr", "li", "div"):
         left = html_text.rfind(f"<{tag}", 0, match_start)
         right = html_text.find(f"</{tag}>", match_end)
         if left >= 0 and right >= 0 and right - left <= 12000:
             return html_text[left : right + len(tag) + 3]
-    left = max(0, match_start - 1800)
-    right = min(len(html_text), match_end + 1800)
+    left = max(0, match_start - 1200)
+    right = min(len(html_text), match_end + 1200)
     return html_text[left:right]
 
 
@@ -113,25 +139,39 @@ def search_result_details(base_url: str, html_text: str) -> list[dict[str, objec
     return results
 
 
-def direct_pdf_links(base_url: str, html_text: str) -> list[str]:
-    urls: list[str] = []
+def direct_pdf_links(base_url: str, html_text: str) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
     seen: set[str] = set()
-    for match in re.findall(r"(?:href|src)=[\"']([^\"']+)[\"']", html_text, flags=re.I):
-        absolute = urljoin(base_url, match)
+    pattern = re.compile(r"(?:href|src)=[\"']([^\"']+)[\"']", flags=re.I)
+    for match in pattern.finditer(html_text):
+        absolute = urljoin(base_url, match.group(1))
         if not strict_same_origin(absolute):
             continue
         lower = absolute.lower()
         if not (
             lower.endswith(".pdf")
             or "/porteddata/extensionpdf/" in lower
-            or "/documents/" in lower and ".pdf" in lower
+            or ("/documents/" in lower and ".pdf" in lower)
         ):
             continue
         if absolute in seen:
             continue
         seen.add(absolute)
-        urls.append(absolute)
-    return urls
+        context = strip_html(enclosing_fragment(html_text, match.start(), match.end()))
+        results.append({"url": absolute, "context": context})
+    return results
+
+
+def significant_tokens(text: str) -> set[str]:
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9\u0D00-\u0D7F'-]{4,}", text)
+    }
+    return {token for token in tokens if token not in TOKEN_STOP and not token.isdigit()}
+
+
+def context_overlap(left: str, right: str) -> int:
+    return len(significant_tokens(left) & significant_tokens(right))
 
 
 def pdf_text(content: bytes) -> str:
@@ -144,7 +184,8 @@ def main() -> int:
     print("preservation: NO")
     print("mutation: NO")
     print("retrieval: read-only official HTTP(S) routes only")
-    print("target window: 2017-01-01 -> 2017-08-22\n")
+    print("target window: 2017-01-01 -> 2017-08-22")
+    print("confirmation requires target evidence in the search row + lottery-result evidence in the PDF\n")
 
     session = requests.Session()
     session.headers.update({"User-Agent": "Collector/1.0 GovernmentDocumentPortalFocusedGate"})
@@ -185,24 +226,23 @@ def main() -> int:
     print("\n3. Search-result document routes")
     print("   document-detail routes:", len(details))
     print("   rows with lottery + target-window date evidence:", len(contextual))
-    for item in details[:30]:
-        print("      url:", item["url"])
-        print("      lottery in row:", "YES" if item["lottery"] else "NO")
-        print(
-            "      target dates in row:",
-            ", ".join(d.isoformat() for d in item["dates"][:8]) if item["dates"] else "NONE",
-        )
-        print("      row context:", str(item["context"])[:700])
+    for item in contextual[:30]:
+        print("      TARGET ROW")
+        print("         url:", item["url"])
+        print("         dates:", ", ".join(d.isoformat() for d in item["dates"][:8]))
+        print("         row context:", str(item["context"])[:900])
 
     print("\n4. Focused detail/PDF validation")
     confirmed: list[dict[str, object]] = []
     reachable_details = 0
-    direct_pdfs = 0
+    candidate_pdfs = 0
+    fetched_pdfs = 0
     parsed_pdfs = 0
     textless_pdfs = 0
+    rejected_pdfs = 0
     failures: list[str] = []
 
-    for item in details:
+    for item in contextual:
         detail_url = str(item["url"])
         try:
             response = session.get(detail_url, timeout=30)
@@ -214,18 +254,28 @@ def main() -> int:
             continue
 
         reachable_details += 1
-        detail_text = norm(response.text)
-        detail_lottery = lottery_evidence(detail_text)
-        detail_dates = target_dates(detail_text)
-        pdf_urls = direct_pdf_links(response.url, response.text)
+        pdf_links = direct_pdf_links(response.url, response.text)
+        candidate_pdfs += len(pdf_links)
 
-        route_signal = bool(
-            (item["lottery"] and item["dates"])
-            or (detail_lottery and detail_dates)
-        )
+        ranked: list[tuple[int, dict[str, str]]] = []
+        for pdf in pdf_links:
+            score = context_overlap(str(item["context"]), pdf["context"])
+            ranked.append((score, pdf))
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
 
-        for pdf_url in pdf_urls:
-            direct_pdfs += 1
+        # A generic category/list page may expose dozens of unrelated current PDFs.
+        # Only inspect links whose local metadata overlaps the target search row.
+        selected = [pair for pair in ranked if pair[0] > 0][:3]
+        if not selected and len(ranked) == 1:
+            selected = ranked
+
+        print("   target detail:", detail_url)
+        print("      direct PDFs on page:", len(pdf_links))
+        print("      PDFs selected by row-context overlap:", len(selected))
+
+        for score, pdf in selected:
+            pdf_url = pdf["url"]
+            fetched_pdfs += 1
             try:
                 pdf_response = session.get(pdf_url, timeout=30)
             except Exception as exc:
@@ -250,30 +300,33 @@ def main() -> int:
             compact_pdf = norm(text)
             if not compact_pdf:
                 textless_pdfs += 1
-            pdf_lottery = lottery_evidence(compact_pdf)
-            pdf_dates = target_dates(compact_pdf)
+                print("      TEXTLESS PDF candidate:", pdf_response.url)
+                continue
 
-            if route_signal or (pdf_lottery and pdf_dates):
-                evidence_dates = list(item["dates"]) or detail_dates or pdf_dates
-                confirmed.append(
-                    {
-                        "detail_url": detail_url,
-                        "pdf_url": pdf_response.url,
-                        "dates": evidence_dates,
-                        "row_context": item["context"],
-                        "detail_signal": detail_lottery and bool(detail_dates),
-                        "pdf_signal": pdf_lottery and bool(pdf_dates),
-                        "pdf_text_chars": len(compact_pdf),
-                    }
-                )
-                print("   CONFIRMED ROUTE")
-                print("      detail:", detail_url)
-                print("      pdf:", pdf_response.url)
-                print(
-                    "      dates:",
-                    ", ".join(d.isoformat() for d in evidence_dates[:8]) if evidence_dates else "UNKNOWN",
-                )
-                print("      PDF text chars:", len(compact_pdf))
+            pdf_dates = target_dates(compact_pdf)
+            strong_pdf = strong_result_evidence(compact_pdf)
+            if not strong_pdf:
+                rejected_pdfs += 1
+                print("      rejected non-result PDF:", pdf_response.url, "| overlap:", score)
+                continue
+
+            evidence_dates = pdf_dates or list(item["dates"])
+            confirmed.append(
+                {
+                    "detail_url": detail_url,
+                    "pdf_url": pdf_response.url,
+                    "dates": evidence_dates,
+                    "row_context": item["context"],
+                    "overlap": score,
+                    "pdf_text_chars": len(compact_pdf),
+                }
+            )
+            print("   CONFIRMED RESULT ROUTE")
+            print("      detail:", detail_url)
+            print("      pdf:", pdf_response.url)
+            print("      row overlap:", score)
+            print("      dates:", ", ".join(d.isoformat() for d in evidence_dates[:8]))
+            print("      PDF text chars:", len(compact_pdf))
 
     unique_confirmed: list[dict[str, object]] = []
     seen_pairs: set[tuple[str, str]] = set()
@@ -284,15 +337,14 @@ def main() -> int:
         seen_pairs.add(pair)
         unique_confirmed.append(item)
 
-    print("\n5. Confirmed target-window lottery retrieval evidence")
-    print("   confirmed routes:", len(unique_confirmed))
+    print("\n5. Confirmed target-window lottery-result retrieval evidence")
+    print("   confirmed result routes:", len(unique_confirmed))
     for item in unique_confirmed[:30]:
         print("      detail URL:", item["detail_url"])
         print("      PDF URL:", item["pdf_url"])
         print("      target dates:", ", ".join(d.isoformat() for d in item["dates"][:10]))
         print("      row context:", str(item["row_context"])[:700])
-        print("      detail metadata signal:", "YES" if item["detail_signal"] else "NO")
-        print("      PDF text signal:", "YES" if item["pdf_signal"] else "NO")
+        print("      row/PDF context overlap:", item["overlap"])
         print("      PDF text chars:", item["pdf_text_chars"])
 
     print("\n=== RETRIEVAL ROUTE GATE SUMMARY ===")
@@ -300,21 +352,24 @@ def main() -> int:
     print("same-origin search accepted: YES")
     print("document-detail routes returned:", len(details))
     print("search-result rows with lottery + target date:", len(contextual))
-    print("reachable document-detail routes:", reachable_details)
-    print("direct official PDF links found:", direct_pdfs)
+    print("reachable target document-detail routes:", reachable_details)
+    print("direct PDF links exposed on target pages:", candidate_pdfs)
+    print("PDFs fetched after row-context filtering:", fetched_pdfs)
     print("PDFs parsed with existing extractor:", parsed_pdfs)
     print("PDFs with no extractable text:", textless_pdfs)
-    print("confirmed pre-Aug 2017 lottery routes:", len(unique_confirmed))
+    print("non-result PDFs rejected:", rejected_pdfs)
+    print("confirmed pre-Aug 2017 lottery-result routes:", len(unique_confirmed))
     print("failures:", len(failures))
     for failure in failures[:12]:
         print("   ", failure)
+
     if unique_confirmed:
         verdict = "YES"
     elif contextual:
-        verdict = "PARTIAL — search rows prove target records, but no usable PDF route was confirmed"
+        verdict = "PARTIAL — official target search rows exist, but no lottery-result PDF was confirmed"
     else:
-        verdict = "NO — prior page-level signal was not confirmed at result-row level"
-    print("pre-Aug 2017 official retrieval route proven:", verdict)
+        verdict = "NO — prior page-level signal was not tied to target lottery result rows"
+    print("pre-Aug 2017 official lottery-result retrieval route proven:", verdict)
     print("No Collector result or Memory state was changed by this gate.")
     return 0
 
