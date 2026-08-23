@@ -6,8 +6,9 @@ from collector.domains.registry import DomainRegistry
 
 
 DOMAIN = "games/chance/lottery/kerala"
-PROBE_DEPTH = 40
 TARGET_CUTOFF = datetime.strptime("23/08/2017", "%d/%m/%Y")
+EVIDENCE_TARGET = 12
+MAX_CONSECUTIVE_EMPTY = 100
 
 
 def parse_date(value: str):
@@ -15,18 +16,26 @@ def parse_date(value: str):
 
 
 def main() -> int:
-    print("=== KERALA LEGACY DIRECT-BELOW-INDEX PROBE ===")
+    print("=== KERALA LEGACY DIRECT-BELOW-INDEX CONTINUITY PROFILE ===")
     print("preservation: NO")
-    print("purpose: test whether the already-proven direct legacy transport continues below the published history index cutoff")
-    print(f"bounded probe depth: {PROBE_DEPTH} addresses below one observed boundary source\n")
+    print("purpose: characterize hidden official legacy transport below the published history cutoff")
+    print(f"evidence target: {EVIDENCE_TARGET} verified pre-cutoff records")
+    print(f"stall safety: {MAX_CONSECUTIVE_EMPTY} consecutive unusable addresses\n")
 
     connector = DomainRegistry().get_connector(DOMAIN)
     assert connector is not None
     resolver = getattr(connector, "legacy_history_resolver", None)
     assert resolver is not None
 
+    families = resolver.families()
+    published_sources = {
+        item.source
+        for family in families
+        for item in family.sources
+    }
+
     boundary_rows = []
-    for family in resolver.families():
+    for family in families:
         if not family.sources:
             continue
         item = family.sources[-1]
@@ -41,7 +50,15 @@ def main() -> int:
             draw_date = parse_date(draw_date_text)
         except ValueError:
             continue
-        boundary_rows.append((draw_date, item.drawno, item.source, family.label or family.option, parsed.get("lottery_name") or ""))
+        boundary_rows.append(
+            (
+                draw_date,
+                item.drawno,
+                item.source,
+                family.label or family.option,
+                parsed.get("lottery_name") or "",
+            )
+        )
 
     if not boundary_rows:
         print("No usable published legacy boundary row could be established.")
@@ -55,49 +72,92 @@ def main() -> int:
     print("   held date:", boundary_date.date().isoformat())
     print("   parsed name:", " ".join(str(boundary_name).split()))
 
-    print("\nDirect legacy transport probe")
+    print("\nDirect legacy continuity profile")
     valid = []
     pre_cutoff = []
-    empties = 0
+    inspected = 0
+    consecutive_empty = 0
+    stop_reason = "address space exhausted"
 
-    for drawno in range(boundary_drawno - 1, max(0, boundary_drawno - PROBE_DEPTH - 1), -1):
+    for drawno in range(boundary_drawno - 1, 0, -1):
+        inspected += 1
         source = f"legacy:{drawno}"
         doc = connector.retrieve(source)
         if doc.error or not doc.content:
-            empties += 1
+            consecutive_empty += 1
+            if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
+                stop_reason = f"stalled after {MAX_CONSECUTIVE_EMPTY} consecutive unusable addresses"
+                break
             continue
 
         parsed = connector.parse(bytes(doc.content)) or {}
         draw_date_text = str(parsed.get("draw_date") or "")
         lottery_name = " ".join(str(parsed.get("lottery_name") or "").split())
         if not draw_date_text or draw_date_text == "Unknown" or not lottery_name:
-            empties += 1
+            consecutive_empty += 1
+            if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
+                stop_reason = f"stalled after {MAX_CONSECUTIVE_EMPTY} consecutive unusable addresses"
+                break
             continue
 
         try:
             draw_date = parse_date(draw_date_text)
         except ValueError:
-            empties += 1
+            consecutive_empty += 1
+            if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
+                stop_reason = f"stalled after {MAX_CONSECUTIVE_EMPTY} consecutive unusable addresses"
+                break
             continue
 
-        item = (source, draw_date, lottery_name)
+        consecutive_empty = 0
+        indexed = source in published_sources
+        item = (source, draw_date, lottery_name, indexed)
         valid.append(item)
-        print(f"   VALID {source} | {draw_date.date().isoformat()} | {lottery_name}")
+        print(
+            f"   VALID {source} | {draw_date.date().isoformat()} | "
+            f"{'INDEXED' if indexed else 'UNINDEXED'} | {lottery_name}"
+        )
 
         if draw_date < TARGET_CUTOFF:
             pre_cutoff.append(item)
-            if len(pre_cutoff) >= 3:
+            if len(pre_cutoff) >= EVIDENCE_TARGET:
+                stop_reason = f"evidence target reached ({EVIDENCE_TARGET} verified pre-cutoff records)"
                 break
+
+    date_inversions = 0
+    for previous, current in zip(valid, valid[1:]):
+        if current[1] > previous[1]:
+            date_inversions += 1
 
     print("\n=== DIRECT LEGACY CONTINUITY SUMMARY ===")
     print("boundary source:", boundary_source)
     print("boundary held date:", boundary_date.date().isoformat())
-    print("addresses inspected:", min(PROBE_DEPTH, max(0, boundary_drawno - 1) - max(0, boundary_drawno - PROBE_DEPTH - 1)))
+    print("addresses inspected:", inspected)
     print("valid legacy PDFs below published boundary:", len(valid))
     print("verified records held before 2017-08-23:", len(pre_cutoff))
-    for source, draw_date, lottery_name in pre_cutoff:
-        print("   ", source, "|", draw_date.date().isoformat(), "|", lottery_name)
-    print("direct legacy transport continues below published index cutoff:", "YES" if pre_cutoff else "NOT PROVEN IN THIS BOUNDED WINDOW")
+    print("unindexed verified records:", sum(1 for item in valid if not item[3]))
+    print("date inversions while addresses descended:", date_inversions)
+    if valid:
+        dates = [item[1] for item in valid]
+        print("observed valid date span:", min(dates).date().isoformat(), "->", max(dates).date().isoformat())
+        print("months observed:", ", ".join(sorted({d.strftime("%Y-%m") for d in dates})))
+    print("consecutive unusable addresses at stop:", consecutive_empty)
+    print("stop reason:", stop_reason)
+    for source, draw_date, lottery_name, indexed in pre_cutoff:
+        print(
+            "   ",
+            source,
+            "|",
+            draw_date.date().isoformat(),
+            "|",
+            "INDEXED" if indexed else "UNINDEXED",
+            "|",
+            lottery_name,
+        )
+    print(
+        "direct legacy transport continues below published index cutoff:",
+        "YES" if pre_cutoff else "NOT PROVEN",
+    )
     print("No Collector result or Memory state was changed by this probe.")
     return 0
 
