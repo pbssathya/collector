@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 
 from collector.domains.registry import DomainRegistry
@@ -7,7 +8,8 @@ from collector.domains.registry import DomainRegistry
 
 DOMAIN = "games/chance/lottery/kerala"
 TARGET_CUTOFF = datetime.strptime("23/08/2017", "%d/%m/%Y")
-EVIDENCE_TARGET = 12
+TARGET_MONTH = "2017-07"
+TARGET_MONTH_RECORDS = 8
 MAX_CONSECUTIVE_EMPTY = 100
 
 
@@ -19,7 +21,7 @@ def main() -> int:
     print("=== KERALA LEGACY DIRECT-BELOW-INDEX CONTINUITY PROFILE ===")
     print("preservation: NO")
     print("purpose: characterize hidden official legacy transport below the published history cutoff")
-    print(f"evidence target: {EVIDENCE_TARGET} verified pre-cutoff records")
+    print(f"cross-month target: {TARGET_MONTH_RECORDS} verified records in {TARGET_MONTH}")
     print(f"stall safety: {MAX_CONSECUTIVE_EMPTY} consecutive unusable addresses\n")
 
     connector = DomainRegistry().get_connector(DOMAIN)
@@ -75,6 +77,7 @@ def main() -> int:
     print("\nDirect legacy continuity profile")
     valid = []
     pre_cutoff = []
+    target_month_records = []
     inspected = 0
     consecutive_empty = 0
     stop_reason = "address space exhausted"
@@ -120,8 +123,13 @@ def main() -> int:
 
         if draw_date < TARGET_CUTOFF:
             pre_cutoff.append(item)
-            if len(pre_cutoff) >= EVIDENCE_TARGET:
-                stop_reason = f"evidence target reached ({EVIDENCE_TARGET} verified pre-cutoff records)"
+
+        if draw_date.strftime("%Y-%m") == TARGET_MONTH:
+            target_month_records.append(item)
+            if len(target_month_records) >= TARGET_MONTH_RECORDS:
+                stop_reason = (
+                    f"cross-month target reached ({TARGET_MONTH_RECORDS} verified records in {TARGET_MONTH})"
+                )
                 break
 
     date_inversions = 0
@@ -140,20 +148,18 @@ def main() -> int:
     if valid:
         dates = [item[1] for item in valid]
         print("observed valid date span:", min(dates).date().isoformat(), "->", max(dates).date().isoformat())
-        print("months observed:", ", ".join(sorted({d.strftime("%Y-%m") for d in dates})))
+        month_counts = Counter(d.strftime("%Y-%m") for d in dates)
+        print(
+            "months observed:",
+            ", ".join(f"{month}={month_counts[month]}" for month in sorted(month_counts)),
+        )
+    print(f"verified records in target month {TARGET_MONTH}:", len(target_month_records))
     print("consecutive unusable addresses at stop:", consecutive_empty)
     print("stop reason:", stop_reason)
-    for source, draw_date, lottery_name, indexed in pre_cutoff:
-        print(
-            "   ",
-            source,
-            "|",
-            draw_date.date().isoformat(),
-            "|",
-            "INDEXED" if indexed else "UNINDEXED",
-            "|",
-            lottery_name,
-        )
+    print(
+        "cross-month hidden transport continuity proven:",
+        "YES" if target_month_records else "NOT PROVEN",
+    )
     print(
         "direct legacy transport continues below published index cutoff:",
         "YES" if pre_cutoff else "NOT PROVEN",
