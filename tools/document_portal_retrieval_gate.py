@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 import sys
-from collections import deque
-from datetime import date, datetime
+from datetime import date
+from html import unescape
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -21,7 +21,6 @@ from document_portal_search_contract_gate import (
     START_URL,
     build_payload,
     norm,
-    same_origin,
 )
 
 TARGET_START = date(2017, 1, 1)
@@ -34,6 +33,11 @@ LOTTERY_TERMS = (
     "draw",
     "ഭാഗ്യക്കുറി",
 )
+
+
+def strict_same_origin(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and parsed.netloc == BASE_HOST
 
 
 def parse_dates(text: str) -> list[date]:
@@ -59,7 +63,7 @@ def parse_dates(text: str) -> list[date]:
     return sorted(found)
 
 
-def target_date_evidence(text: str) -> list[date]:
+def target_dates(text: str) -> list[date]:
     return [value for value in parse_dates(text) if TARGET_START <= value <= TARGET_END]
 
 
@@ -68,26 +72,59 @@ def lottery_evidence(text: str) -> bool:
     return any(term.lower() in lower for term in LOTTERY_TERMS)
 
 
-def candidate_links(base_url: str, html_text: str) -> list[str]:
-    parser = ContractParser()
-    parser.feed(html_text)
+def strip_html(fragment: str) -> str:
+    without_script = re.sub(r"<script\b[^>]*>.*?</script>", " ", fragment, flags=re.I | re.S)
+    without_style = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_script, flags=re.I | re.S)
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", without_style)).split())
+
+
+def enclosing_fragment(html_text: str, match_start: int, match_end: int) -> str:
+    for tag in ("tr", "li"):
+        left = html_text.rfind(f"<{tag}", 0, match_start)
+        right = html_text.find(f"</{tag}>", match_end)
+        if left >= 0 and right >= 0 and right - left <= 12000:
+            return html_text[left : right + len(tag) + 3]
+    left = max(0, match_start - 1800)
+    right = min(len(html_text), match_end + 1800)
+    return html_text[left:right]
+
+
+def search_result_details(base_url: str, html_text: str) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    seen: set[str] = set()
+    pattern = re.compile(
+        r"href=[\"']([^\"']*/documentdetails/[^\"'#?]+(?:[?#][^\"']*)?)[\"']",
+        flags=re.I,
+    )
+    for match in pattern.finditer(html_text):
+        absolute = urljoin(base_url, match.group(1))
+        if not strict_same_origin(absolute) or absolute in seen:
+            continue
+        seen.add(absolute)
+        context = strip_html(enclosing_fragment(html_text, match.start(), match.end()))
+        results.append(
+            {
+                "url": absolute,
+                "context": context,
+                "lottery": lottery_evidence(context),
+                "dates": target_dates(context),
+            }
+        )
+    return results
+
+
+def direct_pdf_links(base_url: str, html_text: str) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
-    for href, label in parser.links:
-        absolute = urljoin(base_url, href)
-        if not same_origin(absolute):
+    for match in re.findall(r"(?:href|src)=[\"']([^\"']+)[\"']", html_text, flags=re.I):
+        absolute = urljoin(base_url, match)
+        if not strict_same_origin(absolute):
             continue
-        combined = f"{absolute} {label}".lower()
-        if not any(
-            token in combined
-            for token in (
-                "document",
-                "deptdocument",
-                "details",
-                "download",
-                "pdf",
-                "file",
-            )
+        lower = absolute.lower()
+        if not (
+            lower.endswith(".pdf")
+            or "/porteddata/extensionpdf/" in lower
+            or "/documents/" in lower and ".pdf" in lower
         ):
             continue
         if absolute in seen:
@@ -103,14 +140,14 @@ def pdf_text(content: bytes) -> str:
 
 
 def main() -> int:
-    print("=== GOVERNMENT DOCUMENT PORTAL — RETRIEVAL ROUTE GATE ===")
+    print("=== GOVERNMENT DOCUMENT PORTAL — FOCUSED RETRIEVAL ROUTE GATE ===")
     print("preservation: NO")
     print("mutation: NO")
-    print("retrieval: read-only same-origin GET/POST only")
+    print("retrieval: read-only official HTTP(S) routes only")
     print("target window: 2017-01-01 -> 2017-08-22\n")
 
     session = requests.Session()
-    session.headers.update({"User-Agent": "Collector/1.0 GovernmentDocumentPortalRetrievalGate"})
+    session.headers.update({"User-Agent": "Collector/1.0 GovernmentDocumentPortalFocusedGate"})
 
     surface = session.get(START_URL, timeout=30)
     print("1. Surface:", surface.status_code, surface.url, len(surface.content), "bytes")
@@ -123,8 +160,8 @@ def main() -> int:
 
     form = parser.forms[0]
     action = urljoin(surface.url, str(form.get("action") or surface.url))
-    if not same_origin(action):
-        raise SystemExit(f"Refusing cross-origin search action: {action}")
+    if not strict_same_origin(action):
+        raise SystemExit(f"Refusing non-HTTP(S) or cross-origin search action: {action}")
 
     payload, decisions = build_payload(form, "ymd")
     method = str(form.get("method") or "get").lower()
@@ -142,126 +179,142 @@ def main() -> int:
     print("   bytes:", len(result.content))
     result.raise_for_status()
 
-    initial = candidate_links(result.url, result.text)
-    print("\n3. Candidate retrieval routes from search response")
-    print("   candidates:", len(initial))
-    for url in initial[:25]:
-        print("      ", url)
+    details = search_result_details(result.url, result.text)
+    contextual = [item for item in details if item["lottery"] and item["dates"]]
 
-    queue: deque[tuple[str, int]] = deque((url, 0) for url in initial)
-    visited: set[str] = set()
+    print("\n3. Search-result document routes")
+    print("   document-detail routes:", len(details))
+    print("   rows with lottery + target-window date evidence:", len(contextual))
+    for item in details[:30]:
+        print("      url:", item["url"])
+        print("      lottery in row:", "YES" if item["lottery"] else "NO")
+        print(
+            "      target dates in row:",
+            ", ".join(d.isoformat() for d in item["dates"][:8]) if item["dates"] else "NONE",
+        )
+        print("      row context:", str(item["context"])[:700])
+
+    print("\n4. Focused detail/PDF validation")
     confirmed: list[dict[str, object]] = []
-    reachable = 0
-    html_pages = 0
-    pdfs = 0
+    reachable_details = 0
+    direct_pdfs = 0
+    parsed_pdfs = 0
+    textless_pdfs = 0
     failures: list[str] = []
-    max_fetches = 120
 
-    print("\n4. Read-only route validation")
-    while queue and len(visited) < max_fetches:
-        url, depth = queue.popleft()
-        if url in visited or not same_origin(url):
-            continue
-        visited.add(url)
-
+    for item in details:
+        detail_url = str(item["url"])
         try:
-            response = session.get(url, timeout=30)
+            response = session.get(detail_url, timeout=30)
         except Exception as exc:
-            failures.append(f"{url} | {exc!r}")
+            failures.append(f"{detail_url} | {exc!r}")
             continue
-
         if response.status_code != 200:
-            failures.append(f"{url} | HTTP {response.status_code}")
+            failures.append(f"{detail_url} | HTTP {response.status_code}")
             continue
 
-        reachable += 1
-        content_type = (response.headers.get("content-type") or "").lower()
-        is_pdf = response.content.startswith(b"%PDF") or "application/pdf" in content_type
+        reachable_details += 1
+        detail_text = norm(response.text)
+        detail_lottery = lottery_evidence(detail_text)
+        detail_dates = target_dates(detail_text)
+        pdf_urls = direct_pdf_links(response.url, response.text)
 
-        if is_pdf:
-            pdfs += 1
+        route_signal = bool(
+            (item["lottery"] and item["dates"])
+            or (detail_lottery and detail_dates)
+        )
+
+        for pdf_url in pdf_urls:
+            direct_pdfs += 1
             try:
-                text = pdf_text(response.content)
+                pdf_response = session.get(pdf_url, timeout=30)
             except Exception as exc:
-                failures.append(f"{url} | PDF parse {exc!r}")
+                failures.append(f"{pdf_url} | {exc!r}")
+                continue
+            if pdf_response.status_code != 200:
+                failures.append(f"{pdf_url} | HTTP {pdf_response.status_code}")
+                continue
+            is_pdf = pdf_response.content.startswith(b"%PDF") or "application/pdf" in (
+                pdf_response.headers.get("content-type") or ""
+            ).lower()
+            if not is_pdf:
+                failures.append(f"{pdf_url} | not a PDF response")
                 continue
 
-            dates = target_date_evidence(text)
-            if lottery_evidence(text) and dates:
+            try:
+                text = pdf_text(pdf_response.content)
+            except Exception as exc:
+                failures.append(f"{pdf_url} | PDF parse {exc!r}")
+                continue
+            parsed_pdfs += 1
+            compact_pdf = norm(text)
+            if not compact_pdf:
+                textless_pdfs += 1
+            pdf_lottery = lottery_evidence(compact_pdf)
+            pdf_dates = target_dates(compact_pdf)
+
+            if route_signal or (pdf_lottery and pdf_dates):
+                evidence_dates = list(item["dates"]) or detail_dates or pdf_dates
                 confirmed.append(
                     {
-                        "url": response.url,
-                        "type": "pdf",
-                        "dates": dates,
-                        "snippet": norm(text)[:900],
+                        "detail_url": detail_url,
+                        "pdf_url": pdf_response.url,
+                        "dates": evidence_dates,
+                        "row_context": item["context"],
+                        "detail_signal": detail_lottery and bool(detail_dates),
+                        "pdf_signal": pdf_lottery and bool(pdf_dates),
+                        "pdf_text_chars": len(compact_pdf),
                     }
                 )
+                print("   CONFIRMED ROUTE")
+                print("      detail:", detail_url)
+                print("      pdf:", pdf_response.url)
                 print(
-                    "   CONFIRMED PDF:",
-                    response.url,
-                    "| dates:",
-                    ", ".join(d.isoformat() for d in dates[:6]),
+                    "      dates:",
+                    ", ".join(d.isoformat() for d in evidence_dates[:8]) if evidence_dates else "UNKNOWN",
                 )
-            continue
-
-        html_pages += 1
-        text = response.text
-        dates = target_date_evidence(norm(text))
-        if lottery_evidence(norm(text)) and dates:
-            confirmed.append(
-                {
-                    "url": response.url,
-                    "type": "html",
-                    "dates": dates,
-                    "snippet": norm(text)[:900],
-                }
-            )
-            print(
-                "   CONFIRMED HTML:",
-                response.url,
-                "| dates:",
-                ", ".join(d.isoformat() for d in dates[:6]),
-            )
-
-        if depth < 1:
-            for nested in candidate_links(response.url, text):
-                if nested not in visited:
-                    queue.append((nested, depth + 1))
+                print("      PDF text chars:", len(compact_pdf))
 
     unique_confirmed: list[dict[str, object]] = []
-    seen_confirmed: set[str] = set()
+    seen_pairs: set[tuple[str, str]] = set()
     for item in confirmed:
-        key = str(item["url"])
-        if key in seen_confirmed:
+        pair = (str(item["detail_url"]), str(item["pdf_url"]))
+        if pair in seen_pairs:
             continue
-        seen_confirmed.add(key)
+        seen_pairs.add(pair)
         unique_confirmed.append(item)
 
     print("\n5. Confirmed target-window lottery retrieval evidence")
     print("   confirmed routes:", len(unique_confirmed))
     for item in unique_confirmed[:30]:
-        print("      type:", item["type"])
-        print("      url:", item["url"])
+        print("      detail URL:", item["detail_url"])
+        print("      PDF URL:", item["pdf_url"])
         print("      target dates:", ", ".join(d.isoformat() for d in item["dates"][:10]))
-        print("      snippet:", item["snippet"][:700])
+        print("      row context:", str(item["row_context"])[:700])
+        print("      detail metadata signal:", "YES" if item["detail_signal"] else "NO")
+        print("      PDF text signal:", "YES" if item["pdf_signal"] else "NO")
+        print("      PDF text chars:", item["pdf_text_chars"])
 
     print("\n=== RETRIEVAL ROUTE GATE SUMMARY ===")
     print("official portal reachable: YES")
     print("same-origin search accepted: YES")
-    print("candidate retrieval URLs from search:", len(initial))
-    print("unique routes fetched:", len(visited))
-    print("reachable routes:", reachable)
-    print("HTML routes:", html_pages)
-    print("PDF routes:", pdfs)
+    print("document-detail routes returned:", len(details))
+    print("search-result rows with lottery + target date:", len(contextual))
+    print("reachable document-detail routes:", reachable_details)
+    print("direct official PDF links found:", direct_pdfs)
+    print("PDFs parsed with existing extractor:", parsed_pdfs)
+    print("PDFs with no extractable text:", textless_pdfs)
     print("confirmed pre-Aug 2017 lottery routes:", len(unique_confirmed))
-    print("direct confirmed PDFs:", sum(1 for x in unique_confirmed if x["type"] == "pdf"))
     print("failures:", len(failures))
-    for item in failures[:12]:
-        print("   ", item)
-    print(
-        "pre-Aug 2017 official retrieval route proven:",
-        "YES" if unique_confirmed else "NO",
-    )
+    for failure in failures[:12]:
+        print("   ", failure)
+    if unique_confirmed:
+        verdict = "YES"
+    elif contextual:
+        verdict = "PARTIAL — search rows prove target records, but no usable PDF route was confirmed"
+    else:
+        verdict = "NO — prior page-level signal was not confirmed at result-row level"
+    print("pre-Aug 2017 official retrieval route proven:", verdict)
     print("No Collector result or Memory state was changed by this gate.")
     return 0
 
