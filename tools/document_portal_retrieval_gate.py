@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections import deque
 from datetime import date, datetime
+from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
 
 from collector.extractors.pdf import extract_pdf_structure, iter_pdf_lines
-from tools.document_portal_search_contract_gate import (
+
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from document_portal_search_contract_gate import (
     BASE_HOST,
     ContractParser,
     START_URL,
