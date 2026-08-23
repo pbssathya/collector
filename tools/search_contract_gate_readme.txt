@@ -1,0 +1,1 @@
+This temporary habitat note documents that document_portal_search_contract_gate.py is a read-only search-contract probe. It performs only same-origin GET/POST search requests and does not preserve Collector results or touch Nokku Memory.
