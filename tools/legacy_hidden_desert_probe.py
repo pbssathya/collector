@@ -35,6 +35,7 @@ def main() -> int:
         window_start = next_drawno
         window_end = max(1, window_start - WINDOW_SIZE + 1)
         window_valid_before = len(valid)
+        window_inspected_before = inspected
 
         print(
             f"\nWINDOW {window_number:02d}: "
@@ -69,9 +70,10 @@ def main() -> int:
                 break
 
         found_this_window = len(valid) - window_valid_before
+        inspected_this_window = inspected - window_inspected_before
         print(
-            f"   window summary: {WINDOW_SIZE if window_end > 1 else window_start} "
-            f"addresses bounded | {found_this_window} valid"
+            f"   window summary: {inspected_this_window} inspected | "
+            f"{found_this_window} valid"
         )
 
         if len(valid) >= EVIDENCE_TARGET or window_end <= 1:
