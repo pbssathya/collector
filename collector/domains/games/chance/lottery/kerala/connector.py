@@ -173,6 +173,61 @@ class Connector(BaseConnector):
                 lottery_name=lottery_name,
             )
 
+    def resolve_legacy_address_continuation(
+        self,
+        stalled_drawno: int,
+        *,
+        max_probe: int = 100,
+        progress: Optional[LegacyAddressProgress] = None,
+    ) -> Optional[LegacyAddressRecord]:
+        """Find the first verified legacy record below an unresolved scan stall.
+
+        This is a bounded continuation resolver, not a chronology resolver. It
+        inspects at most ``max_probe`` lower direct addresses and returns the first
+        independently parsed result. Returning a record proves only that the
+        transport continues below the stall; returning ``None`` leaves coverage
+        unresolved. Neither outcome proves that historical events are contiguous.
+        """
+        if max_probe < 1:
+            raise ValueError("max_probe must be at least 1")
+        if stalled_drawno <= 1:
+            return None
+
+        lowest_drawno = max(1, int(stalled_drawno) - int(max_probe))
+
+        for drawno in range(int(stalled_drawno) - 1, lowest_drawno - 1, -1):
+            source = f"{self.LEGACY_PREFIX}{drawno}"
+            doc = self.retrieve(source)
+
+            result = None
+            if not doc.error and doc.content:
+                result = self.parser.parse(bytes(doc.content))
+
+            draw_date: Optional[datetime] = None
+            lottery_name = ""
+            if result and result.draw_date and result.draw_date != "Unknown":
+                try:
+                    draw_date = datetime.strptime(result.draw_date, "%d/%m/%Y")
+                except ValueError:
+                    draw_date = None
+                lottery_name = " ".join(str(result.lottery_name or "").split())
+
+            usable = draw_date is not None and bool(lottery_name)
+            if progress is not None:
+                progress(source, draw_date, usable)
+
+            if not usable:
+                continue
+
+            assert draw_date is not None
+            return LegacyAddressRecord(
+                drawno=drawno,
+                draw_date=draw_date.date(),
+                lottery_name=lottery_name,
+            )
+
+        return None
+
     def legacy_sources_for_year(self, year: int) -> list[str]:
         """Discover official legacy sources whose parsed held date falls in ``year``.
 
