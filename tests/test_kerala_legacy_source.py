@@ -120,3 +120,45 @@ def test_legacy_year_discovery_stops_each_family_at_its_own_boundary():
 
     assert connector.legacy_sources_for_year(2020) == ["legacy:2"]
     assert connector.retrieve.call_count == 3
+
+
+def test_legacy_year_discovery_reuses_known_dates_without_refetching_them():
+    connector = Connector()
+    connector.legacy_history_resolver = Mock()
+    connector.legacy_history_resolver.families.return_value = [
+        LegacyFamily(
+            option="x",
+            label="TEST",
+            sources=(
+                LegacySource(drawno=4, sequence=4, text="newer-known"),
+                LegacySource(drawno=3, sequence=3, text="target-known"),
+                LegacySource(drawno=2, sequence=2, text="older-live"),
+            ),
+        )
+    ]
+
+    connector.retrieve = Mock(
+        return_value=make_document("legacy:2", b"%PDF-2")
+    )
+    connector.parser = Mock()
+    connector.parser.parse.return_value = make_result("31/12/2019")
+
+    progress = []
+    result = connector.legacy_sources_for_year(
+        2020,
+        known_draw_dates={
+            "legacy:4": "01/01/2021",
+            "legacy:3": "31/12/2020",
+        },
+        progress=lambda source, draw_date, reused: progress.append(
+            (source, draw_date.strftime("%d/%m/%Y"), reused)
+        ),
+    )
+
+    assert result == ["legacy:3"]
+    assert connector.retrieve.call_count == 1
+    assert progress == [
+        ("legacy:4", "01/01/2021", True),
+        ("legacy:3", "31/12/2020", True),
+        ("legacy:2", "31/12/2019", False),
+    ]
