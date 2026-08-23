@@ -180,3 +180,50 @@ def test_direct_legacy_scan_reports_unresolved_stall_after_no_progress():
 
     assert exc_info.value.last_drawno == 2
     assert exc_info.value.consecutive_unusable == 2
+
+
+def test_legacy_continuation_resolver_finds_verified_record_below_stall():
+    connector = Connector()
+    connector.retrieve = Mock(
+        side_effect=[
+            make_document("legacy:56537", b"%PDF-56537"),
+            make_document("legacy:56536", b"%PDF-56536"),
+            make_document("legacy:56535", b"%PDF-56535"),
+        ]
+    )
+    connector.parser = Mock()
+    connector.parser.parse.side_effect = [
+        None,
+        None,
+        make_result("11/07/2017"),
+    ]
+
+    record = connector.resolve_legacy_address_continuation(
+        56538,
+        max_probe=3,
+    )
+
+    assert record is not None
+    assert record.source == "legacy:56535"
+    assert record.draw_date.isoformat() == "2017-07-11"
+    assert connector.retrieve.call_count == 3
+
+
+def test_legacy_continuation_resolver_is_bounded_when_no_record_is_found():
+    connector = Connector()
+    connector.retrieve = Mock(
+        side_effect=[
+            make_document("legacy:10", b"%PDF-10"),
+            make_document("legacy:9", b"%PDF-9"),
+        ]
+    )
+    connector.parser = Mock()
+    connector.parser.parse.side_effect = [None, None]
+
+    record = connector.resolve_legacy_address_continuation(
+        11,
+        max_probe=2,
+    )
+
+    assert record is None
+    assert connector.retrieve.call_count == 2
