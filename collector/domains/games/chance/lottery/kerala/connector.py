@@ -1,9 +1,8 @@
 """
 Kerala Lottery Connector
 """
-
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, Mapping
 from urllib.parse import urljoin
 
 from collector.core.fetcher import HTTPFetcher
@@ -12,6 +11,9 @@ from collector.contracts.document import Document
 from .history import OfficialHistoryResolver
 from .legacy import LEGACY_REPORT_URL, LegacyHistoryResolver, script_location
 from .parser import Parser
+
+
+LegacyDiscoveryProgress = Callable[[str, datetime, bool], None]
 
 
 class Connector(BaseConnector):
@@ -102,41 +104,74 @@ class Connector(BaseConnector):
         previous = self.history_resolver.previous_source_id(before_source)
         return str(previous) if previous is not None else None
 
-    def legacy_sources_for_year(self, year: int) -> list[str]:
+    def legacy_sources_for_year(
+        self,
+        year: int,
+        *,
+        known_draw_dates: Optional[Mapping[str, str]] = None,
+        progress: Optional[LegacyDiscoveryProgress] = None,
+    ) -> list[str]:
         """Discover official legacy sources whose parsed held date falls in ``year``.
 
         Discovery walks each official legacy lottery family in its own published
-        family order. It never compares drawno values across families. Every source
-        is validated through the same retrieve/parse path used by Collector.
+        family order. It never compares drawno values across families.
+
+        ``known_draw_dates`` is an optional caller-supplied cache of previously
+        validated ``legacy:<drawno>`` held dates. Valid entries are reused only to
+        avoid re-fetching already-known sources while locating the requested year;
+        missing or malformed hints fall back to the normal official retrieve/parse
+        path. The returned source set is unchanged by whether hints are supplied.
+
+        ``progress`` is an optional observation callback invoked as
+        ``progress(source, draw_date, reused_hint)`` for each inspected row. It does
+        not affect discovery decisions.
         """
         if year in self._legacy_year_cache:
             return list(self._legacy_year_cache[year])
 
+        known_draw_dates = known_draw_dates or {}
         discovered: list[tuple[datetime, str]] = []
         seen_sources: set[str] = set()
 
         for family in self.legacy_history_resolver.families():
             for item in family.sources:
                 source_text = item.source
-                doc = self.retrieve(source_text)
+                draw_date: Optional[datetime] = None
+                reused_hint = False
 
-                if doc.error or not doc.content:
-                    raise RuntimeError(
-                        f"Legacy source {source_text} could not be retrieved: {doc.error}"
-                    )
+                hint = known_draw_dates.get(source_text)
+                if hint:
+                    try:
+                        draw_date = datetime.strptime(str(hint), "%d/%m/%Y")
+                        reused_hint = True
+                    except ValueError:
+                        # A hint is only an optimization. Invalid hints must never
+                        # weaken correctness; fall back to the official source.
+                        draw_date = None
 
-                result = self.parser.parse(bytes(doc.content))
-                if not result or not result.draw_date or result.draw_date == "Unknown":
-                    raise RuntimeError(
-                        f"Legacy source {source_text} has no usable held date."
-                    )
+                if draw_date is None:
+                    doc = self.retrieve(source_text)
 
-                try:
-                    draw_date = datetime.strptime(result.draw_date, "%d/%m/%Y")
-                except ValueError as exc:
-                    raise RuntimeError(
-                        f"Legacy source {source_text} has invalid held date {result.draw_date!r}."
-                    ) from exc
+                    if doc.error or not doc.content:
+                        raise RuntimeError(
+                            f"Legacy source {source_text} could not be retrieved: {doc.error}"
+                        )
+
+                    result = self.parser.parse(bytes(doc.content))
+                    if not result or not result.draw_date or result.draw_date == "Unknown":
+                        raise RuntimeError(
+                            f"Legacy source {source_text} has no usable held date."
+                        )
+
+                    try:
+                        draw_date = datetime.strptime(result.draw_date, "%d/%m/%Y")
+                    except ValueError as exc:
+                        raise RuntimeError(
+                            f"Legacy source {source_text} has invalid held date {result.draw_date!r}."
+                        ) from exc
+
+                if progress is not None:
+                    progress(source_text, draw_date, reused_hint)
 
                 if draw_date.year > year:
                     continue
