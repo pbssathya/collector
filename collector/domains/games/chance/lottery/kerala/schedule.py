@@ -76,7 +76,7 @@ def _find_upcoming_table(tables: list[list[list[str]]]) -> tuple[list[list[str]]
 
 
 def _parse_lottery_cell(value: str) -> tuple[str, str | None]:
-    match = re.match(r"^(.*?)\s*\(([^()]]+)\)\s*$", value.strip())
+    match = re.fullmatch(r"(.*?)\s*\(([^()]+)\)\s*", value.strip())
     if not match:
         return value.strip(), None
     return match.group(1).strip(), match.group(2).strip()
