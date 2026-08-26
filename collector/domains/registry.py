@@ -29,6 +29,12 @@ class DomainRegistry:
         except ImportError as e:
             print(f"Warning: Could not load kerala domain: {e}")
 
+        try:
+            from collector.domains.games.chance.lottery.kerala.schedule import ScheduleConnector
+            self._connectors["games/chance/lottery/kerala/schedule"] = ScheduleConnector
+        except ImportError as e:
+            print(f"Warning: Could not load kerala schedule domain: {e}")
+
     def get_connector(self, domain_path: str, **kwargs) -> Optional[Connector]:
         """
         Get a connector for a domain path.
