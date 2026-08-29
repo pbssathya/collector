@@ -4,7 +4,7 @@ The current result endpoint is addressed by ``drawserial``. Living Habitat evide
 shows that those identifiers are usually locally sequential but can contain large
 historical discontinuities. The official older-draw page already publishes result
 links grouped by lottery, so this module uses that existing source capability to
-resolve the nearest published serial below a known serial.
+resolve published serials.
 
 This module discovers source addresses only. It does not interpret lottery results.
 """
@@ -85,14 +85,15 @@ def nearest_lower_source(before_source: int, candidates: Iterable[int]) -> Optio
 
 
 class OfficialHistoryResolver:
-    """Resolve prior published drawserials through the official history page."""
+    """Resolve published drawserials through the official history page."""
 
     def __init__(self, timeout: float = 30.0) -> None:
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Collector/1.0 KeralaHistoryResolver"})
 
-    def previous_source_id(self, before_source: int) -> Optional[int]:
+    def published_source_ids(self) -> set[int]:
+        """Return modern drawserials explicitly present in official history evidence."""
         landing = self.session.get(DETAILS_URL, timeout=self.timeout)
         landing.raise_for_status()
         options = parse_lottery_options(landing.text)
@@ -115,5 +116,11 @@ class OfficialHistoryResolver:
             )
             response.raise_for_status()
             candidates.update(parse_drawserials(response.text))
+        return candidates
 
-        return nearest_lower_source(before_source, candidates)
+    def is_published_source(self, source_id: int) -> bool:
+        """Report whether official published-source evidence contains ``source_id``."""
+        return source_id in self.published_source_ids()
+
+    def previous_source_id(self, before_source: int) -> Optional[int]:
+        return nearest_lower_source(before_source, self.published_source_ids())
