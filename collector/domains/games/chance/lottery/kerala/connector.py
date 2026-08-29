@@ -5,6 +5,7 @@ Kerala Lottery Connector
 from datetime import datetime
 from typing import Optional, Dict, Any
 from urllib.parse import urljoin
+import uuid
 
 from collector.core.fetcher import HTTPFetcher
 from collector.contracts.connector import Connector as BaseConnector
@@ -59,12 +60,28 @@ class Connector(BaseConnector):
             return pdf_doc
 
         url = f"{self.RESULT_BASE}?drawserial={source_text}"
+        try:
+            source_id = int(source_text)
+        except ValueError:
+            # Preserve the existing fetch behaviour for unsupported/non-numeric
+            # addresses; supports() remains the authority for address shape.
+            return self.fetcher.retrieve(url)
+
+        if not self.history_resolver.is_published_source(source_id):
+            return Document(
+                id=str(uuid.uuid4()),
+                source_url=url,
+                retrieved_at=datetime.now(),
+                content=None,
+                run_id=str(uuid.uuid4()),
+                connector_id=self.__class__.__name__,
+                metadata={"source_state": "not_published"},
+            )
+
         return self.fetcher.retrieve(url)
 
     def parse(self, content: bytes) -> Optional[Dict[str, Any]]:
-        """
-        Parse Kerala result PDF content into the existing normalized contract.
-        """
+        """Parse Kerala result PDF content into the existing normalized contract."""
         result = self.parser.parse(content)
         if not result:
             return None
@@ -147,8 +164,6 @@ class Connector(BaseConnector):
                         discovered.append((draw_date, source_text))
                     continue
 
-                # This family's published sequence has crossed below the target
-                # year. Stop only this family; never infer anything about another.
                 break
 
         ordered = [source for _date, source in sorted(discovered)]

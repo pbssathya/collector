@@ -104,6 +104,14 @@ def collect(domain_path: str, source: str, store: bool = True, requester: Option
             })
             return _create_failed_report(domain_path, source, requested_at, requester, run_id, events, error=doc.error)
 
+        if doc.metadata.get("source_state") == "not_published":
+            events.append({
+                "type": "source_not_published",
+                "message": "Requested source is not present in official published-source evidence",
+                "timestamp": datetime.now().isoformat() + "Z"
+            })
+            return _create_failed_report(domain_path, source, requested_at, requester, run_id, events)
+
         if not doc.content:
             events.append({
                 "type": "empty_content",
