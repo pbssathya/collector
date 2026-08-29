@@ -4,12 +4,14 @@ These tests verify connector behaviour without making the core contract depend
 on the availability or behaviour of an unrelated external test service.
 """
 
-from unittest.mock import patch
+from datetime import datetime
+from unittest.mock import Mock, patch
 
 import pytest
 import requests
 
 from collector.contracts.connector import ConnectorError
+from collector.contracts.document import Document
 from collector.core.fetcher import HTTPFetcher
 from collector.domains.registry import DomainRegistry
 
@@ -22,13 +24,25 @@ def kerala_connector():
 
 
 def test_supported_source_retrieval(kerala_connector):
-    """Verify a supported source can be retrieved."""
-    try:
-        doc = kerala_connector.retrieve("12345")
-        assert doc is not None
-        assert doc.content is not None
-    except ConnectorError:
-        pytest.skip("External service unavailable")
+    """Verify a published supported source follows the retrieval path."""
+    kerala_connector.history_resolver = Mock()
+    kerala_connector.history_resolver.is_published_source.return_value = True
+    kerala_connector.fetcher = Mock()
+    kerala_connector.fetcher.retrieve.return_value = Document(
+        id="doc-test",
+        source_url="http://result.keralalotteries.com/viewlotisresult.php?drawserial=12345",
+        retrieved_at=datetime.now(),
+        content=b"collected material",
+        run_id="run-test",
+        connector_id="http_fetcher",
+        content_type="application/pdf",
+    )
+
+    doc = kerala_connector.retrieve("12345")
+
+    assert doc is not None
+    assert doc.content == b"collected material"
+    kerala_connector.fetcher.retrieve.assert_called_once()
 
 
 def test_connection_failure_reporting():
