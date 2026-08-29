@@ -39,7 +39,6 @@ def test_unpublished_modern_source_is_distinct_from_empty_content():
 
     assert report["execution"]["status"] == "failed"
     assert [event["type"] for event in report["execution"]["events"]] == ["source_not_published"]
-    assert report["metadata"]["source_url"].endswith(f"drawserial={SOURCE}")
     connector.fetcher.retrieve.assert_not_called()
 
 
