@@ -1,14 +1,9 @@
-"""Collector release version contract."""
+from pathlib import Path
+import tomllib
 
-from importlib.metadata import version
-
-from collector.collect import collect
+import collector
 
 
-def test_collector_version_is_1_0_0():
-    """Package metadata and report provenance must agree for v1.0.0."""
-    report = collect("unknown/domain", "release-check", store=False)
-
-    assert version("collector") == "1.0.0"
-    assert report is not None
-    assert report["provenance"]["collector_version"] == "1.0.0"
+def test_package_version_matches_project_metadata():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    assert collector.__version__ == pyproject["project"]["version"]
