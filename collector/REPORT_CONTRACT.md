@@ -45,7 +45,8 @@ The report is a JSON object with the following structure:
   },
   "provenance": {
     "run_id": "run_123456",
-    "collector_version": "0.1.0",
+    "collector_version": "1.0.0",
     "domain_version": "1.0.0"
   }
 }
+```
