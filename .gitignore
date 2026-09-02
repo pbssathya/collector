@@ -13,3 +13,5 @@ build/
 venv/
 .venv/
 
+# Default runtime Knowledge Store
+knowledge.db

@@ -23,6 +23,8 @@ Collector's duty is stable. It does not reinterpret its mission or decide how th
 
 The Knowledge Store is the contract between Collector and its consumers. Collector may persist collected and structured material when requested, while consumers remain unaware of how that material was obtained.
 
+The default SQLite implementation creates `knowledge.db` at runtime when no alternate database path is supplied. That runtime database is local state and is not tracked by the repository.
+
 ## Status
 
 ✅ **Collector 1.0.0 — Stable Cell**
@@ -36,6 +38,8 @@ The first stable Collector cell includes:
 - SQLite knowledge storage
 - standardized Collector report contract
 - automated test verification across supported Python versions
+
+The current Kerala Lottery connector additionally demonstrates habitat-driven extension through official history/source resolution, dynamic prize-tier preservation, official upcoming-schedule collection, and a distinct `source_not_published` execution event when a requested modern drawserial is absent from official published-source evidence.
 
 Future domains should extend Collector through connectors and configuration rather than architectural rewrites.
 
