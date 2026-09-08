@@ -143,6 +143,11 @@ class Parser:
             if current is None:
                 continue
 
+            if self._is_prize_section_boundary(line):
+                tiers.append(current)
+                current = None
+                break
+
             if self._is_non_prize_line(line):
                 continue
 
@@ -154,6 +159,20 @@ class Parser:
         return tiers
 
     @staticmethod
+    def _is_prize_section_boundary(line: str) -> bool:
+        """Recognize structural transitions from prize data into Government footer text."""
+        lower = line.lower()
+        if re.match(r"^(?:the\s+)?prize winners are advised\b", lower):
+            return True
+        if lower.startswith("next ") and " draw will be held on " in lower:
+            return True
+        if re.match(r"^sd\s*/-\s*$", line, re.IGNORECASE):
+            return True
+        if lower.startswith("digitally signed by"):
+            return True
+        return False
+
+    @staticmethod
     def _is_non_prize_line(line: str) -> bool:
         lower = line.lower()
         if lower.startswith("for the tickets ending"):
@@ -163,10 +182,6 @@ class Parser:
         if lower.startswith("modernization & it software division"):
             return True
         if lower.startswith("www.statelottery.kerala.gov.in"):
-            return True
-        if lower.startswith("the prize winners are advised"):
-            return True
-        if lower.startswith("next ") and " draw will be held on " in lower:
             return True
         if re.match(r"^\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}$", line):
             return True
