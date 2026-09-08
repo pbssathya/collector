@@ -2,9 +2,9 @@
 
 The current result endpoint is addressed by ``drawserial``. Living Habitat evidence
 shows that those identifiers are usually locally sequential but can contain large
-historical discontinuities. The official older-draw page already publishes result
-links grouped by lottery, so this module uses that existing source capability to
-resolve published serials.
+historical discontinuities. The official current-results page publishes the newest
+result links, while the older-draw page publishes historical links grouped by lottery.
+This module uses both Government surfaces according to their actual roles.
 
 This module discovers source addresses only. It does not interpret lottery results.
 """
@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 
 
+CURRENT_RESULTS_URL = "https://result.keralalotteries.com/"
 DETAILS_URL = "https://result.keralalotteries.com/detailsofdrawweb.php"
 
 
@@ -85,15 +86,21 @@ def nearest_lower_source(before_source: int, candidates: Iterable[int]) -> Optio
 
 
 class OfficialHistoryResolver:
-    """Resolve published drawserials through the official history page."""
+    """Resolve published drawserials through official Kerala result surfaces."""
 
     def __init__(self, timeout: float = 30.0) -> None:
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Collector/1.0 KeralaHistoryResolver"})
 
-    def published_source_ids(self) -> set[int]:
-        """Return modern drawserials explicitly present in official history evidence."""
+    def _current_source_ids(self) -> set[int]:
+        """Return drawserials explicitly listed on the current official results page."""
+        response = self.session.get(CURRENT_RESULTS_URL, timeout=self.timeout)
+        response.raise_for_status()
+        return parse_drawserials(response.text)
+
+    def _historical_source_ids(self) -> set[int]:
+        """Return drawserials explicitly present in the official older-draw evidence."""
         landing = self.session.get(DETAILS_URL, timeout=self.timeout)
         landing.raise_for_status()
         options = parse_lottery_options(landing.text)
@@ -118,9 +125,16 @@ class OfficialHistoryResolver:
             candidates.update(parse_drawserials(response.text))
         return candidates
 
+    def published_source_ids(self) -> set[int]:
+        """Return published modern drawserials from current and historical evidence."""
+        return self._current_source_ids() | self._historical_source_ids()
+
     def is_published_source(self, source_id: int) -> bool:
-        """Report whether official published-source evidence contains ``source_id``."""
-        return source_id in self.published_source_ids()
+        """Report whether current or historical official evidence contains ``source_id``."""
+        current = self._current_source_ids()
+        if source_id in current:
+            return True
+        return source_id in self._historical_source_ids()
 
     def previous_source_id(self, before_source: int) -> Optional[int]:
         return nearest_lower_source(before_source, self.published_source_ids())
