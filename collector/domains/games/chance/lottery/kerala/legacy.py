@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
+from datetime import date
 from html.parser import HTMLParser
 from typing import Optional
 
@@ -46,6 +47,32 @@ class LegacyFamily:
     option: str
     label: str
     sources: tuple[LegacySource, ...]
+
+
+@dataclass(frozen=True)
+class LegacyAddressRecord:
+    """One verified result recovered from the direct legacy address transport."""
+
+    drawno: int
+    draw_date: date
+    lottery_name: str
+
+    @property
+    def source(self) -> str:
+        return f"legacy:{self.drawno}"
+
+
+class LegacyAddressScanStalled(RuntimeError):
+    """Raised when direct address scanning stops making verified progress."""
+
+    def __init__(self, last_drawno: int, consecutive_unusable: int) -> None:
+        self.last_drawno = last_drawno
+        self.consecutive_unusable = consecutive_unusable
+        super().__init__(
+            "Legacy address scan stalled at "
+            f"legacy:{last_drawno} after {consecutive_unusable} "
+            "consecutive unusable addresses."
+        )
 
 
 class _LegacyRowParser(HTMLParser):

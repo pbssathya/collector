@@ -3,7 +3,7 @@ Kerala Lottery Connector
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, Iterator
 from urllib.parse import urljoin
 import uuid
 
@@ -11,8 +11,17 @@ from collector.core.fetcher import HTTPFetcher
 from collector.contracts.connector import Connector as BaseConnector
 from collector.contracts.document import Document
 from .history import OfficialHistoryResolver
-from .legacy import LEGACY_REPORT_URL, LegacyHistoryResolver, script_location
+from .legacy import (
+    LEGACY_REPORT_URL,
+    LegacyAddressRecord,
+    LegacyAddressScanStalled,
+    LegacyHistoryResolver,
+    script_location,
+)
 from .parser import Parser
+
+
+LegacyAddressProgress = Callable[[str, Optional[datetime], bool], None]
 
 
 class Connector(BaseConnector):
@@ -118,6 +127,123 @@ class Connector(BaseConnector):
 
         previous = self.history_resolver.previous_source_id(before_source)
         return str(previous) if previous is not None else None
+
+    def iter_legacy_address_records(
+        self,
+        start_drawno: int,
+        *,
+        max_consecutive_unusable: int = 100,
+        progress: Optional[LegacyAddressProgress] = None,
+    ) -> Iterator[LegacyAddressRecord]:
+        """Yield verified legacy results while descending direct source addresses.
+
+        ``drawno`` is treated only as an address to inspect, never as chronology.
+        Each usable result is independently parsed and dated before it is yielded.
+
+        Safety is progress-based: the scan continues while verified records keep
+        appearing, and raises ``LegacyAddressScanStalled`` only after
+        ``max_consecutive_unusable`` addresses produce no usable parsed result.
+        A stall is unresolved source coverage, not proof that history ended.
+        """
+        if start_drawno < 1:
+            return
+        if max_consecutive_unusable < 1:
+            raise ValueError("max_consecutive_unusable must be at least 1")
+
+        consecutive_unusable = 0
+
+        for drawno in range(int(start_drawno), 0, -1):
+            source = f"{self.LEGACY_PREFIX}{drawno}"
+            doc = self.retrieve(source)
+
+            result = None
+            if not doc.error and doc.content:
+                result = self.parser.parse(bytes(doc.content))
+
+            draw_date: Optional[datetime] = None
+            lottery_name = ""
+            if result and result.draw_date and result.draw_date != "Unknown":
+                try:
+                    draw_date = datetime.strptime(result.draw_date, "%d/%m/%Y")
+                except ValueError:
+                    draw_date = None
+                lottery_name = " ".join(str(result.lottery_name or "").split())
+
+            usable = draw_date is not None and bool(lottery_name)
+            if progress is not None:
+                progress(source, draw_date, usable)
+
+            if not usable:
+                consecutive_unusable += 1
+                if consecutive_unusable >= max_consecutive_unusable:
+                    raise LegacyAddressScanStalled(
+                        last_drawno=drawno,
+                        consecutive_unusable=consecutive_unusable,
+                    )
+                continue
+
+            consecutive_unusable = 0
+            assert draw_date is not None
+            yield LegacyAddressRecord(
+                drawno=drawno,
+                draw_date=draw_date.date(),
+                lottery_name=lottery_name,
+            )
+
+    def resolve_legacy_address_continuation(
+        self,
+        stalled_drawno: int,
+        *,
+        max_probe: int = 100,
+        progress: Optional[LegacyAddressProgress] = None,
+    ) -> Optional[LegacyAddressRecord]:
+        """Find the first verified legacy record below an unresolved scan stall.
+
+        This is a bounded continuation resolver, not a chronology resolver. It
+        inspects at most ``max_probe`` lower direct addresses and returns the first
+        independently parsed result. Returning a record proves only that the
+        transport continues below the stall; returning ``None`` leaves coverage
+        unresolved. Neither outcome proves that historical events are contiguous.
+        """
+        if max_probe < 1:
+            raise ValueError("max_probe must be at least 1")
+        if stalled_drawno <= 1:
+            return None
+
+        lowest_drawno = max(1, int(stalled_drawno) - int(max_probe))
+
+        for drawno in range(int(stalled_drawno) - 1, lowest_drawno - 1, -1):
+            source = f"{self.LEGACY_PREFIX}{drawno}"
+            doc = self.retrieve(source)
+
+            result = None
+            if not doc.error and doc.content:
+                result = self.parser.parse(bytes(doc.content))
+
+            draw_date: Optional[datetime] = None
+            lottery_name = ""
+            if result and result.draw_date and result.draw_date != "Unknown":
+                try:
+                    draw_date = datetime.strptime(result.draw_date, "%d/%m/%Y")
+                except ValueError:
+                    draw_date = None
+                lottery_name = " ".join(str(result.lottery_name or "").split())
+
+            usable = draw_date is not None and bool(lottery_name)
+            if progress is not None:
+                progress(source, draw_date, usable)
+
+            if not usable:
+                continue
+
+            assert draw_date is not None
+            return LegacyAddressRecord(
+                drawno=drawno,
+                draw_date=draw_date.date(),
+                lottery_name=lottery_name,
+            )
+
+        return None
 
     def legacy_sources_for_year(self, year: int) -> list[str]:
         """Discover official legacy sources whose parsed held date falls in ``year``.

@@ -1,9 +1,12 @@
 from datetime import datetime
 from unittest.mock import Mock
 
+import pytest
+
 from collector.contracts.document import Document
 from collector.domains.games.chance.lottery.kerala.connector import Connector
 from collector.domains.games.chance.lottery.kerala.legacy import (
+    LegacyAddressScanStalled,
     LegacyFamily,
     LegacySource,
     parse_legacy_rows,
@@ -120,3 +123,107 @@ def test_legacy_year_discovery_stops_each_family_at_its_own_boundary():
 
     assert connector.legacy_sources_for_year(2020) == ["legacy:2"]
     assert connector.retrieve.call_count == 3
+
+
+def test_direct_legacy_scan_resets_stall_counter_when_progress_appears():
+    connector = Connector()
+    connector.retrieve = Mock(
+        side_effect=[
+            make_document("legacy:5", b"%PDF-5"),
+            make_document("legacy:4", b"%PDF-4"),
+            make_document("legacy:3", b"%PDF-3"),
+            make_document("legacy:2", b"%PDF-2"),
+            make_document("legacy:1", b"%PDF-1"),
+        ]
+    )
+    connector.parser = Mock()
+    connector.parser.parse.side_effect = [
+        None,
+        make_result("21/08/2017"),
+        None,
+        make_result("22/08/2017"),
+        None,
+    ]
+
+    records = list(
+        connector.iter_legacy_address_records(
+            5,
+            max_consecutive_unusable=2,
+        )
+    )
+
+    assert [record.source for record in records] == ["legacy:4", "legacy:2"]
+    assert [record.draw_date.isoformat() for record in records] == [
+        "2017-08-21",
+        "2017-08-22",
+    ]
+
+
+def test_direct_legacy_scan_reports_unresolved_stall_after_no_progress():
+    connector = Connector()
+    connector.retrieve = Mock(
+        side_effect=[
+            make_document("legacy:3", b"%PDF-3"),
+            make_document("legacy:2", b"%PDF-2"),
+        ]
+    )
+    connector.parser = Mock()
+    connector.parser.parse.side_effect = [None, None]
+
+    with pytest.raises(LegacyAddressScanStalled) as exc_info:
+        list(
+            connector.iter_legacy_address_records(
+                3,
+                max_consecutive_unusable=2,
+            )
+        )
+
+    assert exc_info.value.last_drawno == 2
+    assert exc_info.value.consecutive_unusable == 2
+
+
+def test_legacy_continuation_resolver_finds_verified_record_below_stall():
+    connector = Connector()
+    connector.retrieve = Mock(
+        side_effect=[
+            make_document("legacy:56537", b"%PDF-56537"),
+            make_document("legacy:56536", b"%PDF-56536"),
+            make_document("legacy:56535", b"%PDF-56535"),
+        ]
+    )
+    connector.parser = Mock()
+    connector.parser.parse.side_effect = [
+        None,
+        None,
+        make_result("11/07/2017"),
+    ]
+
+    record = connector.resolve_legacy_address_continuation(
+        56538,
+        max_probe=3,
+    )
+
+    assert record is not None
+    assert record.source == "legacy:56535"
+    assert record.draw_date.isoformat() == "2017-07-11"
+    assert connector.retrieve.call_count == 3
+
+
+def test_legacy_continuation_resolver_is_bounded_when_no_record_is_found():
+    connector = Connector()
+    connector.retrieve = Mock(
+        side_effect=[
+            make_document("legacy:10", b"%PDF-10"),
+            make_document("legacy:9", b"%PDF-9"),
+        ]
+    )
+    connector.parser = Mock()
+    connector.parser.parse.side_effect = [None, None]
+
+    record = connector.resolve_legacy_address_continuation(
+        11,
+        max_probe=2,
+    )
+
+    assert record is None
+    assert connector.retrieve.call_count == 2
